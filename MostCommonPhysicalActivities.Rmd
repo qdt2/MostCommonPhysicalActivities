@@ -1,0 +1,638 @@
+---
+title: "Most Common Physical Activities, Behavioral
+  Risk Factor Surveillance System 2023"
+subtitle: ''
+author: Jasmine
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+knit: (function(inputFile, encoding) { 
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file="Output/Markdown.html") })
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    theme: cosmo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+# load packages
+library(tidyverse)
+library(here)
+library(janitor)
+library(survey)
+library(srvyr)
+library(flextable)
+library(patchwork)
+library(sjmisc)
+
+# no scientific notation
+options(scipen=999)
+# NAs in tables as empty strings
+options(knitr.kable.NA = "")
+
+# check working directory
+getwd()
+here()
+```
+
+# Methods {.hidden .unlisted .unnumbered}
+
+## Data wrangling
+
+### Download data
+
+Download data from 2023
+
+-   [data](https://www.cdc.gov/brfss/annual_data/annual_2023.html)
+-   [codebook](https://www.cdc.gov/brfss/annual_data/2023/zip/codebook23_llcp-v2-508.zip)
+
+### Load data
+
+```{r}
+brfss23 <- rio::import(here("Input", "LLCP2023.XPT"))
+save(brfss23, file = here("Input", "brfss23.Rdata"))
+
+load(file = here("Input", "brfss23.Rdata"))
+
+brfss23 %>% tabyl(`_RACE`) # check against codebook, n=313067 for _RACE=1
+```
+
+### Create new variables
+
+#### Survey variables and sociodemographic characteristics
+
+```{r}
+df <- brfss23 %>% mutate(
+  
+  # create indicator for overall summary
+  one = 1,
+  
+  # survey data variables
+  # this syntax helps make the survey design object later
+  strata = `_STSTR`,
+  weight = `_LLCPWT`,
+  
+  # sex
+  sex =  factor(x = SEXVAR,
+                levels = c(2, 1),
+                labels = c("Female", "Male"),
+                ordered = FALSE),
+  
+  # age
+  age = case_when(`_AGEG5YR` == 14 ~ NA, # missing
+                  `_AGEG5YR` %in% c(1, 2) ~ 1, # 18–29 
+                   `_AGEG5YR` %in% c(3, 4, 5) ~ 2, # 30–44
+                  `_AGEG5YR` %in% c(6, 7) ~ 3, # 45–54
+                  `_AGEG5YR` %in% c(8, 9) ~ 4, # 55–64
+                  `_AGEG5YR` %in% c(10, 11) ~ 5, # 65–74
+                  `_AGEG5YR` %in% c(12, 13) ~ 6, # ≥ 75 years
+                  TRUE ~ NA),
+  
+  age = factor(x = age,
+               levels = c(1, 2, 3, 4, 5, 6),
+               labels = c("18–29", "30–44", "45–54", "55–64", "65–74", "≥75"),
+               ordered = FALSE),
+  
+  # race/ethnicity
+  raceeth = case_when(
+    `_RACE` == 9 ~ NA,
+    TRUE ~ `_RACE`),
+  raceeth = factor(x = `_RACE`,
+                levels = c(3, 4, 2, 8, 7, 5, 1, 6),
+                labels = c("American Indian or Alaskan Native, non-Hispanic",
+                           "Asian, non-Hispanic", 
+                           "Black, non-Hispanic",
+                           "Hispanic", 
+                           "Multiracial, non-Hispanic",
+                           "Native Hawaiian or other Pacific Islander, non-Hispanic",
+                           "White, non-Hispanic", 
+                           "Another single race, non-Hispanic"),
+                ordered = FALSE),
+  
+  # education level
+  edu = case_when(
+    `_EDUCAG` == 9 ~ NA,
+    TRUE ~ `_EDUCAG`),
+  edu = factor(x = `_EDUCAG`,
+               levels = c(1, 2, 3, 4),
+               labels = c("Did not graduate high school",
+                          "Graduated high school",
+                          "Attended college or technical school",
+                          "Graduated from college or technical school"),
+               ordered = FALSE),
+  
+  # BMI
+  bmi = factor(x = `_BMI5CAT`,
+               levels = c(1, 2, 3, 4),
+               labels = c("Underweight",
+                          "Normal weight",
+                          "Overweight",
+                          "Obesity"),
+               ordered = FALSE) 
+  )
+  
+# check
+
+# Return a list with factor levels and numeric codes for each factor column
+lapply(df[ , sapply(df, is.factor)], function(v) {
+  data.frame(Levels=levels(unique(sort(v))),
+             Values=as.numeric(unique(sort(v))))
+  })
+
+# cross tabs between coded and original variables
+df %>% tabyl(sex, SEXVAR)
+df %>% dplyr::group_by(age, `_AGEG5YR`) %>% tally() %>% arrange(`_AGEG5YR`) %>% print(n = 20)
+df %>% dplyr::group_by(raceeth, `_RACE`) %>% tally() %>% arrange(`_RACE`)
+df %>% dplyr::group_by(edu, `_EDUCAG`) %>% tally() %>% arrange(`_EDUCAG`)
+df %>% dplyr::group_by(bmi, `_BMI5CAT`) %>% tally() %>% arrange(`_BMI5CAT`)
+```
+
+#### Physical activities 
+```{r}
+
+# most common activities
+## this code creates a new column for each activity, and participants can report up to two activities (so can have response of 1 for max of two columns)
+
+df <- df %>% 
+  mutate(
+    walking = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 1 | EXRACT22 == 1) ~ 1, 
+                        TRUE ~ 0),
+    running = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 2 | EXRACT22 == 2) ~ 1, 
+                        TRUE ~ 0),
+    gardening = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 3 | EXRACT22 == 3) ~ 1, 
+                        TRUE ~ 0),
+    bicycling = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 4 | EXRACT22 == 4) ~ 1, 
+                        TRUE ~ 0),
+    aerobics = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 5 | EXRACT22 == 5) ~ 1, 
+                        TRUE ~ 0),
+    calisthenics = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 6 | EXRACT22 == 6) ~ 1, 
+                        TRUE ~ 0),
+    elliptical = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 7 | EXRACT22 == 7) ~ 1, 
+                        TRUE ~ 0),
+    household = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 8 | EXRACT22 == 8) ~ 1, 
+                        TRUE ~ 0),
+    weightlifting = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 9 | EXRACT22 == 9) ~ 1, 
+                        TRUE ~ 0),
+    yoga = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 10 | EXRACT22 == 10) ~ 1, 
+                        TRUE ~ 0),
+    other = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
+                        EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
+                        EXERANY2 == 1 & (EXRACT12 == 11 | EXRACT22 == 11) ~ 1, 
+                        TRUE ~ 0)
+    )
+
+# check for walking
+df %>%
+  group_by(walking, EXERANY2, EXRACT12, EXRACT22) %>%
+  summarise(Count = n(), .groups = 'drop') %>% 
+  print(n=999)
+
+```
+
+#### Inclusion indicator
+```{r}
+
+# inclusion/exclusion
+df <- df %>% 
+  mutate(
+    include = case_when(
+      `_PA150R4` == 9 ~ FALSE, # missing aerobic data,
+      is.na(sex) ~ FALSE, # missing sex data
+      is.na(age) ~ FALSE, # missing age
+      is.na(raceeth) ~ FALSE, # missing race/ethnicity 
+      is.na(edu) ~ FALSE, # missing education
+      is.na(bmi) ~ FALSE, # missing BMI
+      .default = TRUE), # otherwise, include
+    exclude = case_when(
+      `_PA150R4` == 9 ~ "1. Missing aerobic PA data",
+      is.na(sex) ~ "2. Missing sex",
+      is.na(age) ~ "3. Missing age",
+      is.na(raceeth) ~ "4. Missing race/ethnicity",
+      is.na(edu) ~ "5. Missing education",
+      is.na(bmi) ~ "6. Missing BMI",
+      .default = "7. Include"))
+
+# sample flow
+df %>% tabyl(exclude, include)
+
+# check variables for included vs excluded
+df %>% group_by(include) %>% 
+  skimr::skim(sex, age, raceeth, edu, bmi,
+              `_PA150R4`,
+              walking:other)
+  
+```
+
+## Setup for weighted analyses
+
+### Create survey design ojject using srvyr
+```{r}
+# https://wwwn.cdc.gov/nchs/data/Tutorials/Code/DB303_R.r
+# https://www.cdc.gov/brfss/annual_data/2019/pdf/Complex-Smple-Weights-Prep-Module-Data-Analysis-2019-508.pdf
+
+# Set options for allowing a single observation per stratum
+options(survey.lonely.psu = "adjust")
+
+# Create survey design using srvyr package 
+brfssdsgn <- df %>%
+  as_survey_design(ids = 1, # 1 for no cluster ids
+                   weights = weight, # weight variable created above
+                   strata = strata) # sampling was stratified
+
+```
+
+### Subset
+
+```{r}
+
+# Subsetting the original survey design object ensures we keep the design information about the number of clusters and strata
+subset <- subset(brfssdsgn, include == 1)
+
+# subset by sex
+subset_female <- subset(brfssdsgn, include == 1 & sex == "Female")
+subset_male <- subset(brfssdsgn, include == 1 & sex == "Male")
+```
+
+## Create functions
+
+### Sample characteristics (only works on factors)
+
+```{r}
+# function for sample characteristics
+
+sampleCharacteristics <- function(var,
+                                  text = NULL,
+                                  design = subset){
+
+  # formulas
+  formula_var = as.formula(paste("~", var))
+  formula_one = as.formula("~ one")
+  
+  # row with header for characteristic
+  header <- data.frame(characteristic = text)
+  
+    # get unweighted n
+    n <- svyby(formula = formula_one, by = formula_var, design = design, 
+               unwtd.count,
+               na.rm.by = TRUE, na.rm.all = TRUE, na.rm = TRUE) %>% 
+      rename(characteristic = var) %>% 
+      select(characteristic, counts) %>% 
+      `rownames<-`(NULL)  
+    
+    # get overall percentage/mean
+    mean <- svyby(formula = formula_var, by = formula_one, design = design, 
+                  svymean,
+                  keep.var = TRUE, vartype = "se",
+                  na.rm.by = TRUE, na.rm.all = TRUE, na.rm = TRUE) %>%
+      select(starts_with(var)) %>% 
+      pivot_longer(cols = everything(),
+                   names_to = "characteristic",
+                   values_to = "mean") %>%
+      mutate(characteristic = case_when(
+        # characteristic == "raceAnother single race, non-Hispanic" ~ "Another single race, non-Hispanic", # TODO check if we need this line
+        characteristic == "employEmployed for wages or self-employed" ~ "Employed for wages or self-employed",
+        TRUE ~ stringi::stri_replace_all_regex(characteristic, # remove suffixes for later merge
+                                               pattern = var, 
+                                               replacement='',
+                                              vectorize=FALSE)))
+     # get CI corresponding to overall percentage/mean 
+     ci_l <- svyby(formula = formula_var, by = formula_one, design = design, 
+                 svymean,
+                 keep.var=TRUE, vartype="ci",
+                 na.rm.by = TRUE, na.rm.all = TRUE, na.rm = TRUE) %>%
+       select(starts_with("ci_l")) %>%
+       pivot_longer(cols=c(starts_with("ci_l")),
+                    names_to = "characteristic",
+                    values_to = "ci_l") %>%
+       mutate(characteristic = case_when(
+         # characteristic == "ci_l.raceAnother single race, non-Hispanic" ~ "Another single race, non-Hispanic", # TODO check if we need this line
+        characteristic == "ci_l.employEmployed for wages or self-employed" ~ "Employed for wages or self-employed",
+         TRUE ~ stringi::stri_replace_all_regex(characteristic,
+                                                pattern=c('ci_l\\.', var),
+                                                replacement='',
+                                                vectorize=FALSE)))
+     
+     ci_u <- svyby(formula = formula_var, by = formula_one, design = design, 
+                 svymean,
+                 keep.var=TRUE, vartype="ci",
+                 na.rm.by = TRUE, na.rm.all = TRUE, na.rm = TRUE) %>%
+       select(starts_with("ci_u")) %>%
+       pivot_longer(cols=c(starts_with("ci_u")),
+                    names_to = "characteristic",
+                    values_to = "ci_u") %>%
+       mutate(characteristic = case_when(
+         # characteristic == "ci_u.raceAnother single race, non-Hispanic" ~ "Another single race, non-Hispanic", # TODO check if we need this line
+        characteristic == "ci_u.employEmployed for wages or self-employed" ~ "Employed for wages or self-employed",
+         TRUE ~ stringi::stri_replace_all_regex(characteristic,
+                                                pattern=c('ci_u\\.', var),
+                                                replacement='',
+                                                vectorize=FALSE)))
+    
+    # combine n, mean, and CIs
+     output <- bind_rows(header,
+                         plyr::join_all(list(n, mean, ci_u, ci_l), by = "characteristic")) %>%
+       mutate(
+         suppress = case_when(
+           counts < 30 ~ "1. small n",
+           ci_u - ci_l > 0.05 &
+             ((ci_u - ci_l) / mean > 1.3) ~ "2. wide absolute and relative CI width ",
+           TRUE ~ "3. present data"
+         ),
+         display = case_when(
+           # display estimate and 95% CI if not suppressed
+           suppress != "3. present data" ~ "—",
+           TRUE ~ paste0(formatC(mean * 100, digits = 1, format = "f"),
+                                   " (", 
+                                   formatC(ci_l * 100, digits = 1, format = "f"),
+                                   "–", 
+                         formatC(ci_u * 100, digits = 1, format = "f"), 
+                                   ")")
+         ))
+     return(output)
+}
+
+```
+
+### Prevelance of most common physical activities
+
+```{r}
+# function for prevalence and 95% CIs for most common activities
+
+commonActivity <- function(varformula, byformula = ~one, design = subset, name){
+  outcome <- as.character(varformula)[2]
+  
+  # Get mean, stderr, and unweighted sample size
+  n <- svyby(~one, varformula, design, unwtd.count) %>% filter(.data[[outcome]]==1) %>% select(counts)
+  p <- svyby(varformula, byformula, design, svymean, vartype = c("ci", "se"))
+  
+  outSum <- bind_cols(n, p) %>%  # combine
+    mutate(suppress = # suppression flag
+             case_when(
+               counts < 50 ~ "1. small n",
+               se/.data[[outcome]] > .3 ~ "2. large RSE",
+               TRUE ~ "3. present data"),
+           display = # estimate and 95% CI if not suppressed
+             case_when(
+               suppress !="3. present data" ~ "—",
+               TRUE ~ paste0( # concatenate estimates and CIs
+                 formatC(.data[[outcome]] * 100, digits = 1, format = "f"),
+                 " (",
+                 formatC(ci_l * 100, digits = 1, format = "f"),
+                 "–",
+                 formatC(ci_u * 100, digits = 1, format = "f"),
+                 ")"))) %>% 
+    rename(prev = .data[[outcome]]) %>%  # rename to be able to combine later
+    mutate(activity = name) # new col with name of activity
+  
+  rownames(outSum) <- NULL # for index
+  
+  outSum
+}
+```
+
+# Results
+
+## Table 1. Sample characteristics
+
+```{r}
+
+# Table 1
+
+# total for all
+tbl1_total <- bind_rows(
+  sampleCharacteristics(var = "sex", text = "Sex"),
+  sampleCharacteristics(var = "age", text = "Age group (years)"),
+  sampleCharacteristics(var = "raceeth", text = "Race/ethnicity"),
+  sampleCharacteristics(var = "edu", text = "Level of education"),
+  sampleCharacteristics(var = "bmi", text = "Body Mass Index")) %>% 
+  select(characteristic, counts, display)
+
+# females
+tbl1_female <- bind_rows(
+  sampleCharacteristics(var = "sex", text = "Sex", design = subset_female),
+  sampleCharacteristics(var = "age", text = "Age group (years)", design = subset_female),
+  sampleCharacteristics(var = "raceeth", text = "Race/ethnicity", design = subset_female),
+  sampleCharacteristics(var = "edu", text = "Level of education", design = subset_female),
+  sampleCharacteristics(var = "bmi", text = "Body Mass Index", design = subset_female)) %>% 
+  select(characteristic, counts, display) %>% 
+  rename(counts_female = counts,
+         display_female = display)
+
+# males
+tbl1_male <- bind_rows(
+  sampleCharacteristics(var = "sex", text = "Sex", design = subset_male),
+  sampleCharacteristics(var = "age", text = "Age group (years)", design = subset_male),
+  sampleCharacteristics(var = "raceeth", text = "Race/ethnicity", design = subset_male),
+  sampleCharacteristics(var = "edu", text = "Level of education", design = subset_male),
+  sampleCharacteristics(var = "bmi", text = "Body Mass Index", design = subset_male)) %>% 
+  select(characteristic, counts, display) %>% 
+  rename(counts_male = counts,
+         display_male = display)
+
+# join
+tbl1 <- left_join(tbl1_total, tbl1_female,
+                  by = "characteristic") %>% 
+  left_join(tbl1_male, 
+            by = "characteristic")
+
+# table if not stratifying
+tbl1_ft <- tbl1_total %>% 
+  flextable() %>% 
+  set_header_labels(
+    characteristic = "Characteristic",
+    counts = paste0("Unweighted n"),
+    display = "Weighted % (95% CI)") %>%
+  add_header_row(values = paste0("Table 1. Sample characteristics of US adults (N = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), "), Behavioral Risk Factor Surveillance System — United States, 2023"),
+                 colwidths = tbl1_total %>% ncol()) %>% 
+  italic(i = c(which(is.na(tbl1_total$counts))), # italics for readability
+         j = 1) %>% 
+  padding(i = c(which(!is.na(tbl1_total$counts))), # indent for readability
+          j = 1,
+          padding.left = 20) %>%
+  padding(padding.top = 0, padding.bottom = 0) %>% 
+  autofit(add_w=0) %>%
+  flextable::fontsize(size = 10, part="all") %>%
+  font(part="all", fontname = "Arial") %>% 
+  set_table_properties(layout = "autofit") %>% 
+  theme_vanilla()
+
+# TODO add footnote about unweighted n and weighted %
+# if stratifying by sex
+tbl1_ft <- tbl1 %>% 
+  flextable() %>% 
+  set_header_labels(
+    characteristic = "Characteristic",
+    counts = "n",
+    display = "% (95% CI)",
+    counts_female = "n",
+    display_female = "% (95% CI)",
+    counts_male = "n",
+    display_male = "% (95% CI)") %>%
+  add_header_row(values = c("", "Total", "Females", "Males"),
+                 colwidths = c(1, 2, 2, 2)) %>% 
+  add_header_row(values = paste0("Table 1. Sample characteristics of US adults (N = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), "), Behavioral Risk Factor Surveillance System — United States, 2023"),
+                 colwidths = tbl1 %>% ncol()) %>% 
+  italic(i = c(which(is.na(tbl1$counts))), # italics for readability
+         j = 1) %>% 
+  padding(i = c(which(!is.na(tbl1$counts))), # indent for readability
+          j = 1,
+          padding.left = 20) %>%
+  padding(padding.top = 0, padding.bottom = 0) %>% 
+  autofit(add_w=0) %>%
+  flextable::fontsize(size = 10, part="all") %>%
+  font(part="all", fontname = "Arial") %>% 
+  set_table_properties(layout = "autofit") %>% 
+  theme_vanilla()
+
+# display
+tbl1_ft
+
+# TODO fix
+```
+
+## Table 2. Most common physical activities
+
+```{r}
+
+# total
+tbl2_total <- bind_rows(
+  commonActivity(varformula = ~walking, name = "Walking", design = subset),
+  commonActivity(varformula = ~other, name = "Other", design = subset),
+  commonActivity(varformula = ~running, name = "Running or jogging", design = subset),
+  commonActivity(varformula = ~weightlifting, name = "Weight lifting", design = subset),
+  commonActivity(varformula = ~household, name = "Household activities", design = subset),
+  commonActivity(varformula = ~yoga, name = "Yoga, Pilates, or Tai Chi", design = subset),
+  commonActivity(varformula = ~gardening, name = "Gardening or yard work", design = subset),
+  commonActivity(varformula = ~bicycling, name = "Bicycling or bicyling machine exercise", design = subset),
+  commonActivity(varformula = ~aerobics, name = "Aerobics video or class", design = subset),
+  commonActivity(varformula = ~calisthenics, name = "Calisthenics", design = subset),
+  commonActivity(varformula = ~elliptical, name = "Elliptical/EFX machine", design = subset)) %>% 
+  arrange(desc(prev)) %>% 
+  select(activity, counts, display)
+
+# females
+tbl2_female <- bind_rows(
+  commonActivity(varformula = ~walking, name = "Walking", design = subset_female),
+  commonActivity(varformula = ~other, name = "Other", design = subset_female),
+  commonActivity(varformula = ~running, name = "Running or jogging", design = subset_female),
+  commonActivity(varformula = ~weightlifting, name = "Weight lifting", design = subset_female),
+  commonActivity(varformula = ~household, name = "Household activities", design = subset_female),
+  commonActivity(varformula = ~yoga, name = "Yoga, Pilates, or Tai Chi", design = subset_female),
+  commonActivity(varformula = ~gardening, name = "Gardening or yard work", design = subset_female),
+  commonActivity(varformula = ~bicycling, name = "Bicycling or bicyling machine exercise", design = subset_female),
+  commonActivity(varformula = ~aerobics, name = "Aerobics video or class", design = subset_female),
+  commonActivity(varformula = ~calisthenics, name = "Calisthenics", design = subset_female),
+  commonActivity(varformula = ~elliptical, name = "Elliptical/EFX machine", design = subset_female)) %>% 
+  arrange(desc(prev)) %>% 
+  rename(counts_female = counts,
+         display_female = display) %>% 
+  select(activity, counts_female, display_female)
+
+# males
+tbl2_male <- bind_rows(
+  commonActivity(varformula = ~walking, name = "Walking", design = subset_male),
+  commonActivity(varformula = ~other, name = "Other", design = subset_male),
+  commonActivity(varformula = ~running, name = "Running or jogging", design = subset_male),
+  commonActivity(varformula = ~weightlifting, name = "Weight lifting", design = subset_male),
+  commonActivity(varformula = ~household, name = "Household activities", design = subset_male),
+  commonActivity(varformula = ~yoga, name = "Yoga, Pilates, or Tai Chi", design = subset_male),
+  commonActivity(varformula = ~gardening, name = "Gardening or yard work", design = subset_male),
+  commonActivity(varformula = ~bicycling, name = "Bicycling or bicyling machine exercise", design = subset_male),
+  commonActivity(varformula = ~aerobics, name = "Aerobics video or class", design = subset_male),
+  commonActivity(varformula = ~calisthenics, name = "Calisthenics", design = subset_male),
+  commonActivity(varformula = ~elliptical, name = "Elliptical/EFX machine", design = subset_male)) %>% 
+  arrange(desc(prev)) %>% 
+  rename(counts_male = counts,
+         display_male = display) %>% 
+  select(activity, counts_male, display_male)
+
+# join
+tbl2 <- left_join(tbl2_total, tbl2_female,
+                  by = "activity") %>% 
+  left_join(tbl2_male, 
+            by = "activity")
+
+# table if not stratifying by sex
+tbl2_ft <- flextable(tbl2_total) %>% 
+  autofit(add_w=0) %>% 
+  add_header_row(values = as_paragraph("Table 2. Most common non-occupational physical activities among U.S. adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
+                 colwidths = 3) %>% 
+  set_header_labels(activity = "Activity",
+                    counts = "Unweighted n",
+                    display = "Weighted % (95% confidence interval)") %>% 
+  flextable::footnote(i = c(1, 1),
+                      j = c(1, 1),
+                      value = as_paragraph(c(
+                        "Adults were included if they had complete data for aerobic activity.",
+                        "If participants reported any past-month, non-occupational physical activity, they then described the type of their two most common activities.")), #TODO figure out hexcode for " U+0022
+                      part = "header",
+                      ref_symbols = c("a", "b")) %>%
+  flextable::fontsize(size = 9, part="all") %>%
+  font(part="all", fontname = "Arial") %>% 
+  set_table_properties(layout = "autofit") %>% 
+  theme_vanilla()
+
+# table if stratifying by sex
+# TODO add footnote about unweighted n and weighted %
+tbl2_ft <- tbl2 %>% 
+  flextable() %>% 
+  set_header_labels(
+    activity = "Activity",
+    counts = "n",
+    display = "% (95% CI)",
+    counts_female = "n",
+    display_female = "% (95% CI)",
+    counts_male = "n",
+    display_male = "% (95% CI)") %>%
+  add_header_row(values = c("", "Total", "Females", "Males"),
+                 colwidths = c(1, 2, 2, 2)) %>% 
+  add_header_row(values = paste0("Table 2. Most common non-occupational physical activities among U.S. adults (N = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), "), Behavioral Risk Factor Surveillance System — United States, 2023"),
+                 colwidths = tbl2 %>% ncol()) %>% 
+  flextable::footnote(i = c(1, 1),
+                      j = c(1, 1),
+                      value = as_paragraph(c(
+                        "Adults were included if they had complete data for aerobic activity.",
+                        "If participants reported any past-month, non-occupational physical activity, they then described the type of their two most common activities.")), #TODO figure out hexcode for " U+0022
+                      part = "header",
+                      ref_symbols = c("a", "b")) %>%
+  italic(i = c(which(is.na(tbl2$counts))), # italics for readability
+         j = 1) %>% 
+  padding(i = c(which(!is.na(tbl2$counts))), # indent for readability
+          j = 1,
+          padding.left = 20) %>%
+  padding(padding.top = 0, padding.bottom = 0) %>% 
+  autofit(add_w=0) %>%
+  flextable::fontsize(size = 10, part="all") %>%
+  font(part="all", fontname = "Arial") %>% 
+  set_table_properties(layout = "autofit") %>% 
+  theme_vanilla()
+
+# display
+tbl2_ft
+
+```
