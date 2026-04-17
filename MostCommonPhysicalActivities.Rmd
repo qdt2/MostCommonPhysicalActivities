@@ -54,8 +54,8 @@ Download data from 2023
 ### Load data
 
 ```{r}
-brfss23 <- rio::import(here("Input", "LLCP2023.XPT"))
-save(brfss23, file = here("Input", "brfss23.Rdata"))
+# brfss23 <- rio::import(here("Input", "LLCP2023.XPT"))
+# save(brfss23, file = here("Input", "brfss23.Rdata"))
 
 load(file = here("Input", "brfss23.Rdata"))
 
@@ -155,11 +155,20 @@ df %>% dplyr::group_by(bmi, `_BMI5CAT`) %>% tally() %>% arrange(`_BMI5CAT`)
 #### Physical activities 
 ```{r}
 
-# most common activities
+# meeting aerobic PAG and most common activities
 ## this code creates a new column for each activity, and participants can report up to two activities (so can have response of 1 for max of two columns)
 
 df <- df %>% 
   mutate(
+    pag_aerobic = case_when(
+      `_PA150R4` == 9 ~ NA, 
+      TRUE ~ `_PA150R4`),
+    pag_aerobic = factor(x = pag_aerobic,
+               levels = c(1, 2, 3),
+               labels = c("150+ minutes/week",
+                          "1-149 minutes/week",
+                          "0 minutes/week"),
+               ordered = FALSE), 
     walking = case_when(EXERANY2 == 2 ~ 0, # no PA in past month
                         EXERANY2 %in% c(7, 9, NA) ~ NA, # don't know or refused for PA in past month
                         EXERANY2 == 1 & (EXRACT12 == 1 | EXRACT22 == 1) ~ 1, 
@@ -212,6 +221,8 @@ df %>%
   summarise(Count = n(), .groups = 'drop') %>% 
   print(n=999)
 
+df %>% tabyl(`_PA150R4`, pag_aerobic)
+
 ```
 
 #### Inclusion indicator
@@ -235,7 +246,7 @@ df <- df %>%
       is.na(raceeth) ~ "4. Missing race/ethnicity",
       is.na(edu) ~ "5. Missing education",
       is.na(bmi) ~ "6. Missing BMI",
-      .default = "7. Include"))
+      .default = "7. Include")) 
 
 # sample flow
 df %>% tabyl(exclude, include)
@@ -379,7 +390,7 @@ sampleCharacteristics <- function(var,
 
 ```
 
-### Prevelance of most common physical activities
+### Prevalence of most common physical activities
 
 ```{r}
 # function for prevalence and 95% CIs for most common activities
@@ -427,32 +438,89 @@ commonActivity <- function(varformula, byformula = ~one, design = subset, name){
 
 # total for all
 tbl1_total <- bind_rows(
-  sampleCharacteristics(var = "sex", text = "Sex"),
-  sampleCharacteristics(var = "age", text = "Age group (years)"),
-  sampleCharacteristics(var = "raceeth", text = "Race/ethnicity"),
-  sampleCharacteristics(var = "edu", text = "Level of education"),
-  sampleCharacteristics(var = "bmi", text = "Body Mass Index")) %>% 
-  select(characteristic, counts, display)
+  bind_rows(
+    # sampleCharacteristics(var = "sex", text = "Sex", design = subset),
+    sampleCharacteristics(var = "age", text = "Age group (years)", design = subset),
+    sampleCharacteristics(var = "raceeth", text = "Race/ethnicity", design = subset),
+    sampleCharacteristics(var = "edu", text = "Level of education", design = subset),
+    sampleCharacteristics(var = "bmi", text = "Body Mass Index", design = subset),
+    sampleCharacteristics(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset),
+    data.frame(characteristic = "Physical Activity")) %>% 
+    select(characteristic, counts, display),
+  bind_rows(
+    commonActivity(varformula = ~walking, name = "Walking", design = subset),
+    commonActivity(varformula = ~other, name = "Other", design = subset),
+    commonActivity(varformula = ~running, name = "Running or jogging", design = subset),
+    commonActivity(varformula = ~weightlifting, name = "Weight lifting", design = subset),
+    commonActivity(varformula = ~household, name = "Household activities", design = subset),
+    commonActivity(varformula = ~yoga, name = "Yoga, Pilates, or Tai Chi", design = subset),
+    commonActivity(varformula = ~gardening, name = "Gardening or yard work", design = subset),
+    commonActivity(varformula = ~bicycling, name = "Bicycling or bicyling machine exercise", design = subset),
+    commonActivity(varformula = ~aerobics, name = "Aerobics video or class", design = subset),
+    commonActivity(varformula = ~calisthenics, name = "Calisthenics", design = subset),
+    commonActivity(varformula = ~elliptical, name = "Elliptical/EFX machine", design = subset)) %>%
+    arrange(desc(prev)) %>%
+    select(activity, counts, display) %>%
+    rename(characteristic = activity)
+  )
 
 # females
 tbl1_female <- bind_rows(
-  sampleCharacteristics(var = "sex", text = "Sex", design = subset_female),
-  sampleCharacteristics(var = "age", text = "Age group (years)", design = subset_female),
-  sampleCharacteristics(var = "raceeth", text = "Race/ethnicity", design = subset_female),
-  sampleCharacteristics(var = "edu", text = "Level of education", design = subset_female),
-  sampleCharacteristics(var = "bmi", text = "Body Mass Index", design = subset_female)) %>% 
-  select(characteristic, counts, display) %>% 
+  bind_rows(
+    # sampleCharacteristics(var = "sex", text = "Sex", design = subset_female),
+    sampleCharacteristics(var = "age", text = "Age group (years)", design = subset_female),
+    sampleCharacteristics(var = "raceeth", text = "Race/ethnicity", design = subset_female),
+    sampleCharacteristics(var = "edu", text = "Level of education", design = subset_female),
+    sampleCharacteristics(var = "bmi", text = "Body Mass Index", design = subset_female),
+        sampleCharacteristics(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female),
+    data.frame(characteristic = "Physical Activity")) %>% 
+    select(characteristic, counts, display),
+  bind_rows(
+    commonActivity(varformula = ~walking, name = "Walking", design = subset_female),
+    commonActivity(varformula = ~other, name = "Other", design = subset_female),
+    commonActivity(varformula = ~running, name = "Running or jogging", design = subset_female),
+    commonActivity(varformula = ~weightlifting, name = "Weight lifting", design = subset_female),
+    commonActivity(varformula = ~household, name = "Household activities", design = subset_female),
+    commonActivity(varformula = ~yoga, name = "Yoga, Pilates, or Tai Chi", design = subset_female),
+    commonActivity(varformula = ~gardening, name = "Gardening or yard work", design = subset_female),
+    commonActivity(varformula = ~bicycling, name = "Bicycling or bicyling machine exercise", design = subset_female),
+    commonActivity(varformula = ~aerobics, name = "Aerobics video or class", design = subset_female),
+    commonActivity(varformula = ~calisthenics, name = "Calisthenics", design = subset_female),
+    commonActivity(varformula = ~elliptical, name = "Elliptical/EFX machine", design = subset_female)) %>%
+    arrange(desc(prev)) %>%
+    select(activity, counts, display) %>%
+    rename(characteristic = activity)
+  ) %>% 
   rename(counts_female = counts,
          display_female = display)
 
 # males
 tbl1_male <- bind_rows(
-  sampleCharacteristics(var = "sex", text = "Sex", design = subset_male),
-  sampleCharacteristics(var = "age", text = "Age group (years)", design = subset_male),
-  sampleCharacteristics(var = "raceeth", text = "Race/ethnicity", design = subset_male),
-  sampleCharacteristics(var = "edu", text = "Level of education", design = subset_male),
-  sampleCharacteristics(var = "bmi", text = "Body Mass Index", design = subset_male)) %>% 
-  select(characteristic, counts, display) %>% 
+  bind_rows(
+    # sampleCharacteristics(var = "sex", text = "Sex", design = subset_male),
+    sampleCharacteristics(var = "age", text = "Age group (years)", design = subset_male),
+    sampleCharacteristics(var = "raceeth", text = "Race/ethnicity", design = subset_male),
+    sampleCharacteristics(var = "edu", text = "Level of education", design = subset_male),
+    sampleCharacteristics(var = "bmi", text = "Body Mass Index", design = subset_male),
+        sampleCharacteristics(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male),
+    data.frame(characteristic = "Physical Activity")) %>% 
+    select(characteristic, counts, display),
+  bind_rows(
+    commonActivity(varformula = ~walking, name = "Walking", design = subset_male),
+    commonActivity(varformula = ~other, name = "Other", design = subset_male),
+    commonActivity(varformula = ~running, name = "Running or jogging", design = subset_male),
+    commonActivity(varformula = ~weightlifting, name = "Weight lifting", design = subset_male),
+    commonActivity(varformula = ~household, name = "Household activities", design = subset_male),
+    commonActivity(varformula = ~yoga, name = "Yoga, Pilates, or Tai Chi", design = subset_male),
+    commonActivity(varformula = ~gardening, name = "Gardening or yard work", design = subset_male),
+    commonActivity(varformula = ~bicycling, name = "Bicycling or bicyling machine exercise", design = subset_male),
+    commonActivity(varformula = ~aerobics, name = "Aerobics video or class", design = subset_male),
+    commonActivity(varformula = ~calisthenics, name = "Calisthenics", design = subset_male),
+    commonActivity(varformula = ~elliptical, name = "Elliptical/EFX machine", design = subset_male)) %>%
+    arrange(desc(prev)) %>%
+    select(activity, counts, display) %>%
+    rename(characteristic = activity)
+  ) %>% 
   rename(counts_male = counts,
          display_male = display)
 
@@ -462,26 +530,26 @@ tbl1 <- left_join(tbl1_total, tbl1_female,
   left_join(tbl1_male, 
             by = "characteristic")
 
-# table if not stratifying
-tbl1_ft <- tbl1_total %>% 
-  flextable() %>% 
-  set_header_labels(
-    characteristic = "Characteristic",
-    counts = paste0("Unweighted n"),
-    display = "Weighted % (95% CI)") %>%
-  add_header_row(values = paste0("Table 1. Sample characteristics of US adults (N = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), "), Behavioral Risk Factor Surveillance System — United States, 2023"),
-                 colwidths = tbl1_total %>% ncol()) %>% 
-  italic(i = c(which(is.na(tbl1_total$counts))), # italics for readability
-         j = 1) %>% 
-  padding(i = c(which(!is.na(tbl1_total$counts))), # indent for readability
-          j = 1,
-          padding.left = 20) %>%
-  padding(padding.top = 0, padding.bottom = 0) %>% 
-  autofit(add_w=0) %>%
-  flextable::fontsize(size = 10, part="all") %>%
-  font(part="all", fontname = "Arial") %>% 
-  set_table_properties(layout = "autofit") %>% 
-  theme_vanilla()
+# # table if not stratifying
+# tbl1_ft <- tbl1_total %>% 
+#   flextable() %>% 
+#   set_header_labels(
+#     characteristic = "Characteristic",
+#     counts = paste0("Unweighted n"),
+#     display = "Weighted % (95% CI)") %>%
+#   add_header_row(values = paste0("Table 1. Sample characteristics of US adults (N = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), "), Behavioral Risk Factor Surveillance System — United States, 2023"),
+#                  colwidths = tbl1_total %>% ncol()) %>% 
+#   italic(i = c(which(is.na(tbl1_total$counts))), # italics for readability
+#          j = 1) %>% 
+#   padding(i = c(which(!is.na(tbl1_total$counts))), # indent for readability
+#           j = 1,
+#           padding.left = 20) %>%
+#   padding(padding.top = 0, padding.bottom = 0) %>% 
+#   autofit(add_w=0) %>%
+#   flextable::fontsize(size = 10, part="all") %>%
+#   font(part="all", fontname = "Arial") %>% 
+#   set_table_properties(layout = "autofit") %>% 
+#   theme_vanilla()
 
 # if stratifying by sex
 tbl1_ft <- tbl1 %>% 
@@ -494,9 +562,12 @@ tbl1_ft <- tbl1 %>%
     display_female = "% (95% CI)",
     counts_male = "n",
     display_male = "% (95% CI)") %>%
-  add_header_row(values = c("", "Total", "Females", "Males"),
+  add_header_row(values = c("", 
+                            paste0("Total (n = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), ")"),  
+                            paste0("Females (n = ", df %>% filter(include == TRUE & sex == "Female") %>% nrow() %>% sjmisc::big_mark(), ")"), 
+                            paste0("Males (n = ", df %>% filter(include == TRUE & sex == "Male") %>% nrow() %>% sjmisc::big_mark(), ")")), 
                  colwidths = c(1, 2, 2, 2)) %>% 
-  add_header_row(values = paste0("Table 1. Sample characteristics of US adults (N = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), "), Behavioral Risk Factor Surveillance System — United States, 2023"),
+  add_header_row(values = paste0("Table 1. Sample characteristics of US adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
                  colwidths = tbl1 %>% ncol()) %>% 
   italic(i = c(which(is.na(tbl1$counts))), # italics for readability
          j = 1) %>% 
@@ -517,11 +588,37 @@ tbl1_ft <- tbl1 %>%
 
 # display
 tbl1_ft
-
-# TODO fix
 ```
 
-## Table 2. Most common physical activities
+## Table 2. Most common physical activities among females
+
+```{r}
+# females
+# TODO fix the stratification
+tbl2_walking <- bind_rows(
+  commonActivity(varformula = ~walking, name = "Walking", byformula = ~age, design = subset_female),
+  commonActivity(varformula = ~walking, name = "Walking", byformula = ~raceeth, design = subset_female),
+  commonActivity(varformula = ~walking, name = "Walking", byformula = ~edu, design = subset_female),
+  commonActivity(varformula = ~walking, name = "Walking", byformula = ~bmi, design = subset_female))
+  
+  
+  # commonActivity(varformula = ~other, name = "Other", design = subset_female),
+  # commonActivity(varformula = ~running, name = "Running or jogging", design = subset_female),
+  # commonActivity(varformula = ~weightlifting, name = "Weight lifting", design = subset_female),
+  # commonActivity(varformula = ~household, name = "Household activities", design = subset_female),
+  # commonActivity(varformula = ~yoga, name = "Yoga, Pilates, or Tai Chi", design = subset_female),
+  # commonActivity(varformula = ~gardening, name = "Gardening or yard work", design = subset_female),
+  # commonActivity(varformula = ~bicycling, name = "Bicycling or bicyling machine exercise", design = subset_female),
+  # commonActivity(varformula = ~aerobics, name = "Aerobics video or class", design = subset_female),
+  # commonActivity(varformula = ~calisthenics, name = "Calisthenics", design = subset_female),
+  # commonActivity(varformula = ~elliptical, name = "Elliptical/EFX machine", design = subset_female)) %>% 
+  # arrange(desc(prev)) %>% 
+  # rename(counts_female = counts,
+  #        display_female = display) %>% 
+  # select(activity, counts_female, display_female)
+```
+
+
 
 ```{r}
 
