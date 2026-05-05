@@ -258,10 +258,11 @@ df <- df %>%
       .default = TRUE), # otherwise, include
     exclude = case_when( # TODO need to fix this to match the code above
       EXERANY2 %in% c(7, 9, NA) ~ "1. don't know, refused, missing for past-month PA", # don't know or refused for PA in past month
-      !complete.cases(sex, age, raceeth, edu, bmi) ~ "2. missing sociodemographic data",
+      !complete.cases(sex, age, raceeth, edu) ~ "2. missing sociodemographic data",
+      is.na(bmi) ~ "3. missing BMI",
       # EXERANY2 != 2 & is.na(EXRACT12) & is.na(EXRACT22) ~ "3. missing data for both activities", # missing data for both activities, no one
-      EXERANY2 == 1 & (EXRACT12 %in% c(77, 99)) ~ "3. refused for first activity, not asked about second", # refused or don't know for first activity, don't answer EXRACT22 #TODO check this one
-      .default = "4. include") # otherwise, include
+      EXERANY2 == 1 & (EXRACT12 %in% c(77, 99)) ~ "4. refused for first activity, not asked about second", # refused or don't know for first activity, don't answer EXRACT22 #TODO check this one
+      .default = "5. include") # otherwise, include
     ) 
 
 # sample flow
