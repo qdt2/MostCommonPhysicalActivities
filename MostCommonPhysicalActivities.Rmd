@@ -1,7 +1,7 @@
 ---
 title: "Most Common Physical Activities, Behavioral
   Risk Factor Surveillance System 2023"
-subtitle: "Excludes people missing data for physical activities and sociodemographics"
+subtitle: "Excludes people missing data for physical activities. Missing sociodemographic information is not in exclusion criteria."
 author: Jasmine
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 knit: (function(inputFile, encoding) { 
@@ -133,7 +133,17 @@ df <- brfss23 %>% mutate(
                           "Normal weight",
                           "Overweight",
                           "Obesity"),
-               ordered = FALSE) 
+               ordered = FALSE),
+  
+  # MSA status
+  msa = case_when(
+    is.na(`_METSTAT`) ~ NA,
+    TRUE ~ `_METSTAT`),
+  msa = factor(x = msa, 
+               levels = c(1, 2),
+               labels = c("Metropolitan counties",
+                          "Nonmetropolitan counties"),
+               ordered = FALSE)
   )
   
 # check
@@ -150,6 +160,7 @@ df %>% dplyr::group_by(age, `_AGEG5YR`) %>% tally() %>% arrange(`_AGEG5YR`) %>% 
 df %>% dplyr::group_by(raceeth, `_RACE`) %>% tally() %>% arrange(`_RACE`)
 df %>% dplyr::group_by(edu, `_EDUCAG`) %>% tally() %>% arrange(`_EDUCAG`)
 df %>% dplyr::group_by(bmi, `_BMI5CAT`) %>% tally() %>% arrange(`_BMI5CAT`)
+df %>% dplyr::group_by(msa, `_METSTAT`) %>% tally() %>% arrange(`_METSTAT`)
 ```
 
 #### Physical activities 
@@ -228,6 +239,7 @@ df %>% tabyl(`_PA150R4`, pag_aerobic)
 #### Inclusion indicator
 ```{r}
 
+#TODO clean this up and check
 # inclusion/exclusion
 df <- df %>% 
   mutate( 
@@ -252,16 +264,16 @@ df <- df %>%
     # if exclusion is based on reported activities
     include = case_when( # TODO check this
       EXERANY2 %in% c(7, 9, NA) ~ FALSE, # don't know or refused for PA in past month
-      EXERANY2 == 2 & complete.cases(sex, age, raceeth, edu, bmi) ~ TRUE, # include those with reported no past-month PA and have sociodemographic data
+      EXERANY2 == 2 & complete.cases(sex) ~ TRUE, # include those with reported no past-month PA and have sociodemographic data
       EXERANY2 == 1 & (EXRACT12 %in% c(77, 99)) ~ FALSE, # yes for past-month PA, refused or don't know for first activity, they are all missing data for second activity
-       !complete.cases(sex, age, raceeth, edu, bmi) ~ FALSE, # not complete cases for sociodemographic data
+       # !complete.cases(sex, age, raceeth, edu) ~ FALSE, # not complete cases for sociodemographic data
       .default = TRUE), # otherwise, include
     exclude = case_when( # TODO need to fix this to match the code above
-      EXERANY2 %in% c(7, 9, NA) ~ "1. don't know, refused, missing for past-month PA", # don't know or refused for PA in past month
-      !complete.cases(sex, age, raceeth, edu) ~ "2. missing sociodemographic data",
-      is.na(bmi) ~ "3. missing BMI",
+      EXERANY2 %in% c(7, 9, NA) ~ "1. don't know, refused, or missing for past-month PA (EXERANY2)", # don't know or refused for PA in past month
+      !(SEXVAR %in% c(1, 2)) ~ "2. missing sex data",
+      # is.na(bmi) ~ "3. missing BMI",
       # EXERANY2 != 2 & is.na(EXRACT12) & is.na(EXRACT22) ~ "3. missing data for both activities", # missing data for both activities, no one
-      EXERANY2 == 1 & (EXRACT12 %in% c(77, 99)) ~ "4. refused for first activity, not asked about second", # refused or don't know for first activity, don't answer EXRACT22 #TODO check this one
+      EXERANY2 == 1 & (EXRACT12 %in% c(77, 99)) ~ "4. refused for first activity (EXRACT12), not asked about second", # refused or don't know for first activity, don't answer EXRACT22 #TODO check this one
       .default = "5. include") # otherwise, include
     ) 
 
@@ -328,6 +340,9 @@ subset_male <- subset(brfssdsgn, include == 1 & sex == "Male")
 
 ```{r}
 # function for sample characteristics
+
+# TODO might need to add some code to include the missing values?
+# subset$variables$bmi <- addNA(subset$variables$bmi)
 
 overallPrevalence <- function(var,
                               text = NULL,
@@ -661,7 +676,8 @@ tbl1_total <- bind_rows(
     overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset),
     overallPrevalence(var = "edu", text = "Level of education", design = subset),
     overallPrevalence(var = "bmi", text = "Body Mass Index category", design = subset),
-        # overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset),
+    overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset),
+    overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset),
     data.frame(characteristic = "Physical Activity")) %>% 
     select(characteristic, counts, display),
   bind_rows(
@@ -687,7 +703,8 @@ tbl1_female <- bind_rows(
     overallPrevalence(var = "raceeth", text = "Race/ethnicity", design = subset_female),
     overallPrevalence(var = "edu", text = "Level of education", design = subset_female),
     overallPrevalence(var = "bmi", text = "Body Mass Index", design = subset_female),
-        overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female),
+    overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_female),
+    overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female),
     data.frame(characteristic = "Physical Activity")) %>% 
     select(characteristic, counts, display),
   bind_rows(
@@ -714,7 +731,8 @@ tbl1_male <- bind_rows(
     overallPrevalence(var = "raceeth", text = "Race/ethnicity", design = subset_male),
     overallPrevalence(var = "edu", text = "Level of education", design = subset_male),
     overallPrevalence(var = "bmi", text = "Body Mass Index", design = subset_male),
-        overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male),
+    overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_female),
+    overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male),
     data.frame(characteristic = "Physical Activity")) %>% 
     select(characteristic, counts, display),
   bind_rows(
@@ -800,6 +818,22 @@ tbl1_ft <- tbl1 %>%
 tbl1_ft
 ```
 
+### T-testing for sex differences for physical activities
+
+```{r}
+svyttest(formula = walking ~ sex, design = subset)
+svyttest(formula = other ~ sex, design = subset)
+svyttest(formula = weightlifting ~ sex, design = subset)
+svyttest(formula = gardening ~ sex, design = subset)
+svyttest(formula = running ~ sex, design = subset)
+svyttest(formula = bicycling ~ sex, design = subset)
+svyttest(formula = household ~ sex, design = subset)
+svyttest(formula = yoga ~ sex, design = subset)
+svyttest(formula = calisthenics ~ sex, design = subset)
+svyttest(formula = aerobics ~ sex, design = subset)
+svyttest(formula = elliptical ~ sex, design = subset) # only one that is different
+```
+
 ## Table 2. Females' most common physical activities
 
 ```{r}
@@ -844,7 +878,9 @@ for (i in outcomes_female) {
     stratifiedPrevalence(outcome = i, var = "age", text = "Age group (years)", design = subset_female),
     stratifiedPrevalence(outcome = i, var = "raceeth", text = "Race and ethnicity", design = subset_female),
     stratifiedPrevalence(outcome = i, var = "edu", text = "Education level", design = subset_female),
-    stratifiedPrevalence(outcome = i, var = "bmi", text = "Body Mass Index category", design = subset_female)
+    stratifiedPrevalence(outcome = i, var = "bmi", text = "Body Mass Index category", design = subset_female),
+    stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan Status", design = subset_female),
+    stratifiedPrevalence(outcome = i, var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female)
     ) %>%
     select(characteristic, display) %>% # TODO add pvalue column?
     rename(!!i := display) # Use !! to dynamically name the column
@@ -920,7 +956,9 @@ for (i in outcomes_male) {
     stratifiedPrevalence(outcome = i, var = "age", text = "Age group (years)", design = subset_male),
     stratifiedPrevalence(outcome = i, var = "raceeth", text = "Race and ethnicity", design = subset_male),
     stratifiedPrevalence(outcome = i, var = "edu", text = "Education level", design = subset_male),
-    stratifiedPrevalence(outcome = i, var = "bmi", text = "Body Mass Index category", design = subset_male)
+    stratifiedPrevalence(outcome = i, var = "bmi", text = "Body Mass Index category", design = subset_male),
+    stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan Status", design = subset_male),
+    stratifiedPrevalence(outcome = i, var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male)
     ) %>%
     select(characteristic, display) %>% # TODO add pvalue column by changing prev to display?
     rename(!!i := display) # Use !! to dynamically name the column
