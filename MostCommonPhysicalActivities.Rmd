@@ -1,7 +1,7 @@
 ---
 title: "Most Common Physical Activities, Behavioral
   Risk Factor Surveillance System 2023"
-subtitle: "Excludes people missing data for physical activities. Missing sociodemographic information is not in exclusion criteria."
+subtitle: "Excludes people missing data for physical activities or sex. Missing other sociodemographic information is not in exclusion criteria."
 author: Jasmine
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 knit: (function(inputFile, encoding) { 
@@ -243,38 +243,17 @@ df %>% tabyl(`_PA150R4`, pag_aerobic)
 # inclusion/exclusion
 df <- df %>% 
   mutate( 
-    # # if exclusion is based on aerobic data
-    # include = case_when(
-    #   `_PA150R4` == 9 ~ FALSE, # missing aerobic data,
-    #   is.na(sex) ~ FALSE, # missing sex data
-    #   is.na(age) ~ FALSE, # missing age
-    #   is.na(raceeth) ~ FALSE, # missing race/ethnicity
-    #   is.na(edu) ~ FALSE, # missing education
-    #   is.na(bmi) ~ FALSE, # missing BMI
-    #   .default = TRUE), # otherwise, include
-    # exclude = case_when(
-    #   `_PA150R4` == 9 ~ "1. Missing aerobic PA data",
-    #   is.na(sex) ~ "2. Missing sex",
-    #   is.na(age) ~ "3. Missing age",
-    #   is.na(raceeth) ~ "4. Missing race/ethnicity",
-    #   is.na(edu) ~ "5. Missing education",
-    #   is.na(bmi) ~ "6. Missing BMI",
-    #   .default = "7. Include"),
-    
-    # if exclusion is based on reported activities
+    # exclusion is based on activities
     include = case_when( # TODO check this
       EXERANY2 %in% c(7, 9, NA) ~ FALSE, # don't know or refused for PA in past month
       EXERANY2 == 2 & complete.cases(sex) ~ TRUE, # include those with reported no past-month PA and have sociodemographic data
       EXERANY2 == 1 & (EXRACT12 %in% c(77, 99)) ~ FALSE, # yes for past-month PA, refused or don't know for first activity, they are all missing data for second activity
-       # !complete.cases(sex, age, raceeth, edu) ~ FALSE, # not complete cases for sociodemographic data
       .default = TRUE), # otherwise, include
     exclude = case_when( # TODO need to fix this to match the code above
       EXERANY2 %in% c(7, 9, NA) ~ "1. don't know, refused, or missing for past-month PA (EXERANY2)", # don't know or refused for PA in past month
       !(SEXVAR %in% c(1, 2)) ~ "2. missing sex data",
-      # is.na(bmi) ~ "3. missing BMI",
-      # EXERANY2 != 2 & is.na(EXRACT12) & is.na(EXRACT22) ~ "3. missing data for both activities", # missing data for both activities, no one
-      EXERANY2 == 1 & (EXRACT12 %in% c(77, 99)) ~ "4. refused for first activity (EXRACT12), not asked about second", # refused or don't know for first activity, don't answer EXRACT22 #TODO check this one
-      .default = "5. include") # otherwise, include
+      EXERANY2 == 1 & (EXRACT12 %in% c(77, 99)) ~ "2. refused for first activity (EXRACT12), not asked about second", # refused or don't know for first activity, don't answer EXRACT22 #TODO check this one
+      .default = "4. include") # otherwise, include
     ) 
 
 # sample flow
@@ -284,7 +263,7 @@ df %>% tabyl(exclude)
 # those with missing data for EXRACT12 also have missing for EXRACT22
 df %>% filter(!(EXERANY2 %in% c(7, 9, NA) | (EXERANY2 == 2 & complete.cases(sex, age, raceeth, edu, bmi)))) %>% filter(is.na(EXRACT12)) %>% tabyl(EXRACT22)
 
-# no respondent with NA for EXRACT12 if EXERANY==1
+# no respondent with NA for EXRACT12 if EXERANY2==1
 df %>% tabyl(EXERANY2, EXRACT12)
 
 # all but 1 who have 77 or 99 for EXRACT12 are missing for EXRACT22. There is one with EXRACT12==1 and EXRACT22 is missing (who in included)
@@ -662,6 +641,40 @@ df %>% tabyl(exclude) %>%
     percent = "%")
 ```
 
+## Differences between included and excluded
+
+```{r, eval=FALSE, include=FALSE}
+chisq.test(df$sex, df$include) # pvalue <0.05
+chisq.test(df$age, df$include) # pvalue <0.05
+chisq.test(df$raceeth, df$include)
+chisq.test(df$edu, df$include) # pvalue <0.05
+chisq.test(df$bmi, df$include) # pvalue <0.05
+chisq.test(df$msa, df$include) # pvalue <0.05
+
+# unweighted sociodemographic differences to eyeball differences, would need pairwise comparisons to specifically call out
+table1::table1(~ sex + age + edu + bmi + msa  | include,
+       data = df, 
+       topclass = "Rtable1-zebra")
+
+# t-testing
+# TODO check this
+
+df2 <- df %>% filter(age %in% c("18–29", "≥75"))
+df2 %>% tabyl(age, include)
+t.test(data = df2, include ~ age)
+t.test(data = df2, as.numeric(age) ~ include)
+chisq.test(df2$include, df2$age)
+
+df3 <- df %>% filter(edu %in% c("Did not graduate high school", "Graduated from college or technical school"))
+t.test(data = df3, include ~ edu)
+
+df4 <- df %>% filter(bmi %in% c("Overweight", "Obesity"))
+t.test(data = df4, include ~ bmi)
+
+df5 <- df %>% filter(msa %in% c("Metropolitan counties", "Nonmetropolitan counties"))
+t.test(data = df5, include ~ msa)
+
+```
 
 ## Table 1. Sample characteristics
 
@@ -808,6 +821,21 @@ tbl1_ft <- tbl1 %>%
                       part = "header",
                       value = as_paragraph(c("N's are unweighted. Prevalence %s and 95% CIs are weighted.")), 
                       ref_symbols = c("a")) %>%
+  flextable::footnote(i = 3,
+                      j = 1,
+                      part = "header",
+                      value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")), 
+                      ref_symbols = c("b")) %>%
+  flextable::footnote(i = which(tbl1 == "Physical Activity"),
+                      j = 1,
+                      part = "body",
+                      value = as_paragraph(c("If participants reported any past-month, non-occupational physical activity, they then described the type of their two most common activities.")), 
+                      ref_symbols = c("c")) %>%
+  flextable::footnote(i = which(tbl1 == "Physical Activity"),
+                      j = 1,
+                      part = "body",
+                      value = as_paragraph(c("There were differences in prevalence between females and males for all activities except Elliptical/EFX machine (weighted t-test p-value <0.001).")), 
+                      ref_symbols = c("d")) %>%
   autofit(add_w=0) %>%
   flextable::fontsize(size = 10, part="all") %>%
   font(part="all", fontname = "Arial") %>% 
@@ -818,7 +846,7 @@ tbl1_ft <- tbl1 %>%
 tbl1_ft
 ```
 
-### T-testing for sex differences for physical activities
+### T-testing for sex differences for physical activities {.hidden .unlisted .unnumbered}
 
 ```{r}
 svyttest(formula = walking ~ sex, design = subset)
@@ -882,8 +910,8 @@ for (i in outcomes_female) {
     stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan Status", design = subset_female),
     stratifiedPrevalence(outcome = i, var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female)
     ) %>%
-    select(characteristic, display) %>% # TODO add pvalue column?
-    rename(!!i := display) # Use !! to dynamically name the column
+    select(characteristic, prev) %>% # TODO change display to prev if don't want p-values 
+    rename(!!i := prev) # Use !! to dynamically name the column
   
   # Merge the temporary table into the main data frame
   tbl2 <- full_join(tbl2, temp_tbl2, by = "characteristic")
@@ -894,7 +922,7 @@ rm(i, temp_tbl2)
 # make flextable
 tbl2_ft <- flextable(tbl2) %>% 
   autofit(add_w=0) %>%
-  add_header_row(values = c("", "Chi-square p-value or prevalence of physical activity, % (95% CI)"),
+  add_header_row(values = c("", "Weighted prevalence of physical activity, % (95% CI)"),
                  colwidths = c(1, tbl2 %>% ncol() - 1)) %>%
   add_header_row(values = as_paragraph("Table 2. Females' five most common non-occupational physical activities, Behavioral Risk Factor Surveillance System — United States, 2023"),
                  colwidths = tbl2 %>% ncol()) %>% 
@@ -910,19 +938,28 @@ tbl2_ft <- flextable(tbl2) %>%
                     aerobics = "Aerobics video or class",
                     calisthenics = "Calisthenics",
                     elliptical = "Elliptical/EFX machine") %>% 
-  flextable::footnote(i = c(1, 1),
-                      j = c(1, 1),
+  flextable::footnote(i = c(1),
+                      j = c(1),
                       value = as_paragraph(c(
-                        "Adults were included if they had complete data for aerobic activity.",
                         "If participants reported any past-month, non-occupational physical activity, they then described the type of their two most common activities.")),
                       part = "header",
-                      ref_symbols = c("a", "b")) %>%
+                      ref_symbols = c("a")) %>%
+    flextable::footnote(i = 2,
+                      j = 2,
+                      part = "header",
+                      value = as_paragraph(c("There were differences in prevelance for the five activities by all characteristics (weighted chi square-test p-value <0.001).")), 
+                      ref_symbols = c("b")) %>%
+  flextable::footnote(i = 3,
+                      j = 1,
+                      part = "header",
+                      value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")), 
+                      ref_symbols = c("c")) %>%
   flextable::footnote(i = which(tbl2 == "—", arr.ind = TRUE)[, 1], 
                       j = which(tbl2 == "—", arr.ind = TRUE)[, 2],
                       part = "body",
                       value = as_paragraph(c(
                         "This estimate is not presented because it has a relative standard error >30%.")),
-                      ref_symbols = c("c")) %>% 
+                      ref_symbols = c("d")) %>% 
   italic(i = which(!grepl("–", tbl2$walking)), # italics
          j = NULL) %>%
   padding(i = which(grepl("–", tbl2$walking)), # indent
@@ -972,7 +1009,7 @@ rm(i, temp_tbl3)
 # make flextable
 tbl3_ft <- flextable(tbl3) %>% 
   autofit(add_w=0) %>%
-  add_header_row(values = c("", "Prevalence of physical activity, % (95% CI)"),
+  add_header_row(values = c("", "Weighted chi-square p-value or weighted prevalence of physical activity, % (95% CI)"),
                  colwidths = c(1, tbl3 %>% ncol() - 1)) %>%
   add_header_row(values = as_paragraph("Table 3. Males' five most common non-occupational physical activities, Behavioral Risk Factor Surveillance System — United States, 2023"),
                  colwidths = tbl3 %>% ncol()) %>% 
@@ -988,13 +1025,17 @@ tbl3_ft <- flextable(tbl3) %>%
                     aerobics = "Aerobics video or class",
                     calisthenics = "Calisthenics",
                     elliptical = "Elliptical/EFX machine") %>% 
-  flextable::footnote(i = c(1, 1),
-                      j = c(1, 1),
+  flextable::footnote(i = c(1),
+                      j = c(1),
                       value = as_paragraph(c(
-                        "Adults were included if they had complete data for aerobic activity.",
                         "If participants reported any past-month, non-occupational physical activity, they then described the type of their two most common activities.")),
                       part = "header",
-                      ref_symbols = c("a", "b")) %>%
+                      ref_symbols = c("a")) %>%
+    flextable::footnote(i = 3,
+                      j = 1,
+                      part = "header",
+                      value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")), 
+                      ref_symbols = c("b")) %>%
   flextable::footnote(i = which(tbl3 == "—", arr.ind = TRUE)[, 1], 
                       j = which(tbl3 == "—", arr.ind = TRUE)[, 2],
                       part = "body",
