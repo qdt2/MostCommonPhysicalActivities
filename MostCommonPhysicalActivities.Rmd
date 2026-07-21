@@ -1,7 +1,6 @@
 ---
-title: "Most Common Physical Activities, Behavioral
-  Risk Factor Surveillance System 2023"
-subtitle: "Excludes people missing data for physical activities or sex. Missing other sociodemographic information is not in exclusion criteria."
+title: "U.S. adults' participation in walking and other physical activities, 2023"
+subtitle: "Updated to reflect Juley 2026 changes to CDAP and research question. Excludes people missing data for physical activities or sex. Missing other sociodemographic information is not in exclusion criteria."
 author: Jasmine
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 knit: (function(inputFile, encoding) { 
@@ -690,7 +689,7 @@ tbl1_total <- bind_rows(
     overallPrevalence(var = "edu", text = "Level of education", design = subset),
     overallPrevalence(var = "bmi", text = "Body Mass Index category", design = subset),
     overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset),
-    overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset),
+    # overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset),
     data.frame(characteristic = "Physical Activity")) %>% 
     select(characteristic, counts, display),
   bind_rows(
@@ -717,7 +716,7 @@ tbl1_female <- bind_rows(
     overallPrevalence(var = "edu", text = "Level of education", design = subset_female),
     overallPrevalence(var = "bmi", text = "Body Mass Index", design = subset_female),
     overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_female),
-    overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female),
+    # overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female),
     data.frame(characteristic = "Physical Activity")) %>% 
     select(characteristic, counts, display),
   bind_rows(
@@ -745,7 +744,7 @@ tbl1_male <- bind_rows(
     overallPrevalence(var = "edu", text = "Level of education", design = subset_male),
     overallPrevalence(var = "bmi", text = "Body Mass Index", design = subset_male),
     overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_female),
-    overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male),
+    # overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male),
     data.frame(characteristic = "Physical Activity")) %>% 
     select(characteristic, counts, display),
   bind_rows(
@@ -829,12 +828,12 @@ tbl1_ft <- tbl1 %>%
   flextable::footnote(i = which(tbl1 == "Physical Activity"),
                       j = 1,
                       part = "body",
-                      value = as_paragraph(c("If participants reported any past-month, non-occupational physical activity, they then described the type of their two most common activities.")), 
+                      value = as_paragraph(c("If participants reported any past-month, non-occupational physical activity, they then listed the types of the two activities they spent the most time doing in the past month.")), 
                       ref_symbols = c("c")) %>%
   flextable::footnote(i = which(tbl1 == "Physical Activity"),
                       j = 1,
                       part = "body",
-                      value = as_paragraph(c("There were differences in prevalence between females and males for all activities except Elliptical/EFX machine (weighted t-test p-value <0.001).")), 
+                      value = as_paragraph(c("There were differences in prevalence between females and males for all activities (weighted t-test p-value <0.001) except Elliptical/EFX machine (weighted t-test p-value = 0.29).")), 
                       ref_symbols = c("d")) %>%
   autofit(add_w=0) %>%
   flextable::fontsize(size = 10, part="all") %>%
@@ -859,8 +858,86 @@ svyttest(formula = household ~ sex, design = subset)
 svyttest(formula = yoga ~ sex, design = subset)
 svyttest(formula = calisthenics ~ sex, design = subset)
 svyttest(formula = aerobics ~ sex, design = subset)
-svyttest(formula = elliptical ~ sex, design = subset) # only one that is different
+svyttest(formula = elliptical ~ sex, design = subset) # only one that is >0.05
 ```
+
+
+## Table 2. Prevalence of walking
+
+```{r}
+tbl2_female <- bind_rows(
+    stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_female),
+    stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_female),
+    stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_female),
+    stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body Mass Index category", design = subset_female),
+    stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan Status", design = subset_female)) %>% 
+  select(characteristic, counts, prev) %>% 
+  rename(counts_female = counts,
+         prev_female = prev)
+
+tbl2_male <- bind_rows(
+    stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_male),
+    stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_male),
+    stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_male),
+    stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body Mass Index category", design = subset_male),
+    stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan Status", design = subset_male)) %>% 
+  select(characteristic, counts, prev) %>% 
+  rename(counts_male = counts,
+         prev_male = prev)
+
+tbl2 <- left_join(tbl2_female, tbl2_male,
+                  by = "characteristic")
+
+tbl2_ft <- tbl2 %>% 
+  flextable() %>% 
+  set_header_labels(
+    characteristic = "Characteristic",
+    counts_female = "n",
+    prev_female = "% (95% CI)",
+    counts_male = "n",
+    prev_male = "% (95% CI)") %>%
+  add_header_row(values = c("", 
+                            paste0("Females (n = ", df %>% filter(include == TRUE & sex == "Female") %>% nrow() %>% sjmisc::big_mark(), ")"), 
+                            paste0("Males (n = ", df %>% filter(include == TRUE & sex == "Male") %>% nrow() %>% sjmisc::big_mark(), ")")), 
+                 colwidths = c(1, 2, 2)) %>% 
+  add_header_row(values = paste0("Table 2. Prevalence of walking among adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
+                 colwidths = tbl2 %>% ncol()) %>% 
+  italic(i = c(which(is.na(tbl2$counts_female))), # italics for readability
+         j = 1) %>% 
+  padding(i = c(which(!is.na(tbl2$counts_female))), # indent for readability
+          j = 1,
+          padding.left = 20) %>%
+  padding(padding.top = 0, padding.bottom = 0) %>% 
+  flextable::footnote(i = 1,
+                      j = 1,
+                      part = "header",
+                      value = as_paragraph(c("N's are unweighted. Prevalence %s and 95% CIs are weighted.")), 
+                      ref_symbols = c("a")) %>%
+  flextable::footnote(i = 1,
+                      j = 1,
+                      part = "header",
+                      value = as_paragraph(c("If participants reported any past-month, non-occupational physical activity, they then listed the types of the two activities they spent the most time doing in the past month. Walking was the most frequently reported physical activity among U.S. adults.")), 
+                      ref_symbols = c("b")) %>%
+  flextable::footnote(i = 3,
+                      j = 1,
+                      part = "header",
+                      value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")), 
+                      ref_symbols = c("c")) %>%
+
+  flextable::footnote(i = which(tbl2 == "Physical Activity"),
+                      j = 1,
+                      part = "body",
+                      value = as_paragraph(c("ADD FOOTNOTE ABOUT PAIRWISE SYMBOLS")), 
+                      ref_symbols = c("d")) %>%
+  autofit(add_w=0) %>%
+  flextable::fontsize(size = 10, part="all") %>%
+  font(part="all", fontname = "Arial") %>% 
+  set_table_properties(layout = "autofit") %>% 
+  theme_vanilla()
+
+tbl2_ft
+```
+
 
 ## Table 2. Females' most common physical activities
 
