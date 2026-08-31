@@ -1,6 +1,6 @@
 ---
 title: "U.S. adults' participation in walking and other physical activities, 2023"
-subtitle: "Updated to reflect Juley 2026 changes to CDAP and research question. Excludes people missing data for physical activities or sex. Missing other sociodemographic information is not in exclusion criteria."
+subtitle: "Updated to reflect July 2026 changes to CDAP and research question. Excludes people missing data for physical activities or sex. Missing other sociodemographic information is not in exclusion criteria."
 author: Jasmine
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 knit: (function(inputFile, encoding) { 
@@ -284,7 +284,7 @@ df %>% group_by(include) %>%
 
 ## Setup for weighted analyses
 
-### Create survey design ojject using srvyr
+### Create survey design object using srvyr
 ```{r}
 # https://wwwn.cdc.gov/nchs/data/Tutorials/Code/DB303_R.r
 # https://www.cdc.gov/brfss/annual_data/2019/pdf/Complex-Smple-Weights-Prep-Module-Data-Analysis-2019-508.pdf
@@ -314,7 +314,7 @@ subset_male <- subset(brfssdsgn, include == 1 & sex == "Male")
 
 ## Create functions
 
-### Function for Table 1 (overall prevalence for sample characteristics)
+### Overall prevalence for sample characteristics
 
 ```{r}
 # function for sample characteristics
@@ -507,7 +507,7 @@ overallPrevalence <- function(var,
 <!-- } -->
 <!-- ``` -->
 
-### Function for Tables 2 and 3 (stratified estimates for physical activities)
+### Stratified estimates for physical activities
 
 ```{r}
 # function to get unweighted n, weighted prevalence mean (95% CI), weighted chi-sq for categorical
@@ -628,6 +628,70 @@ stratifiedPrevalence <- function(outcome, var, text = NA, design) {
 }
 ```
 
+### Pairwise comparisons
+
+```{r}
+
+# pairwise testing
+comparison <- function(var, outcome, design) {
+  
+  # Ensure that 'var' is a factor
+  design[[var]] <- as.factor(design[[var]])
+  
+  # Create a formula for svyttest
+  formula <- as.formula(paste(outcome, "~", var))
+  
+  # Get the levels of the variable
+  levels <- levels(df[[var]])
+  
+  # Check if there are enough levels to compare
+  if (length(levels) < 2) {
+    stop("Not enough levels to compare.")
+  }
+  
+  # Generate all pairs of levels
+  pairs <- combn(levels, 2, simplify = FALSE)
+  # number of pairs (needed later for Bonferroni correction)
+  pairs_number <- pairs %>% length()
+  
+  # Calculate p-values for each pair
+  results <- map_dfr(pairs, ~ {
+    comparison_name <- paste(.x, collapse = " vs ")
+    
+    # Subset the design dataframe for the current pair
+    subset_data <- design %>% filter(!!sym(var) %in% .x)
+    
+    # Check if subset_data is empty
+    if (nrow(subset_data) == 0) {
+      warning(paste("No data for comparison:", comparison_name))
+      return(tibble(comparison = comparison_name, pvalue = NA))
+    }
+    
+    # Perform the svyttest
+    p.value <- svyttest(formula, subset_data)$p.value
+    
+    # format p-value with Bonferroni correction and add asterisk if stat. sig.
+    pvalue <- case_when(
+        p.value >= 0.05/pairs_number ~ formatC(p.value, digits = 3, format = "f"),
+        p.value >= 0.001 & p.value < 0.05/pairs_number ~ paste0(formatC(p.value, digits = 3, format = "f"), "*"),
+        p.value < 0.001 ~ "<0.001*",
+        TRUE ~ "")
+    
+     # Determine if the p-value is statistically significant with Bonferroni correction
+    stat_sig <- case_when(
+        is.na(p.value) ~ NA,
+        p.value >= 0.05/pairs_number ~ FALSE,
+        p.value < 0.05/pairs_number ~ TRUE)
+    
+    # Return the results in a tibble
+    tibble(comparison = comparison_name, pvalue = pvalue, stat_sig = stat_sig)
+  })
+  
+  return(results)
+}
+```
+
+
 # Results
 
 ## Sample flow
@@ -640,7 +704,7 @@ df %>% tabyl(exclude) %>%
     percent = "%")
 ```
 
-## Differences between included and excluded
+## Differences between included and excluded {.hidden .unlisted .unnumbered}
 
 ```{r, eval=FALSE, include=FALSE}
 chisq.test(df$sex, df$include) # pvalue <0.05
@@ -686,7 +750,7 @@ tbl1_total <- bind_rows(
   bind_rows(
     overallPrevalence(var = "age", text = "Age group (years)", design = subset),
     overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset),
-    overallPrevalence(var = "edu", text = "Level of education", design = subset),
+    overallPrevalence(var = "edu", text = "Education level", design = subset),
     overallPrevalence(var = "bmi", text = "Body Mass Index category", design = subset),
     overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset),
     # overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset),
@@ -713,7 +777,7 @@ tbl1_female <- bind_rows(
   bind_rows(
     overallPrevalence(var = "age", text = "Age group (years)", design = subset_female),
     overallPrevalence(var = "raceeth", text = "Race/ethnicity", design = subset_female),
-    overallPrevalence(var = "edu", text = "Level of education", design = subset_female),
+    overallPrevalence(var = "edu", text = "Education level", design = subset_female),
     overallPrevalence(var = "bmi", text = "Body Mass Index", design = subset_female),
     overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_female),
     # overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female),
@@ -741,7 +805,7 @@ tbl1_male <- bind_rows(
   bind_rows(
     overallPrevalence(var = "age", text = "Age group (years)", design = subset_male),
     overallPrevalence(var = "raceeth", text = "Race/ethnicity", design = subset_male),
-    overallPrevalence(var = "edu", text = "Level of education", design = subset_male),
+    overallPrevalence(var = "edu", text = "Education level", design = subset_male),
     overallPrevalence(var = "bmi", text = "Body Mass Index", design = subset_male),
     overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_female),
     # overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male),
@@ -865,6 +929,8 @@ svyttest(formula = elliptical ~ sex, design = subset) # only one that is >0.05
 ## Table 2. Prevalence of walking
 
 ```{r}
+
+# TODO change n to numerator or remove n columns
 tbl2_female <- bind_rows(
     stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_female),
     stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_female),
@@ -938,198 +1004,290 @@ tbl2_ft <- tbl2 %>%
 tbl2_ft
 ```
 
+### Pairwise comparisons. These tables wil not be in the paper, but we will add symbols to Table 2 depecting the statistically significant differences.
 
-## Table 2. Females' most common physical activities
-
-```{r}
-# outcomes for both Table 2 and 3
-outcomes <- c("walking",
-              "other",
-              "weightlifting",
-              "gardening",
-              "running",
-              "bicycling",
-              "household",
-              "yoga",
-              "calisthenics",
-              "aerobics",
-              "elliptical")
-
-outcomes_female <- c("walking",
-              "gardening",
-              "weightlifting",
-              "running",
-              "household")
-
-outcomes_male <- c("walking",
-              "weightlifting",
-              "running",
-              "gardening",
-              "bicycling")
-```
+#### Among females
 
 ```{r}
-# FEMALES
 
-# Initialize an empty data frame
-tbl2 <- data.frame(
-  characteristic = character(),
-  stringsAsFactors = FALSE
-)
+tbl2_pairwise_female <- bind_rows(
+  data.frame(comparison = "Age group (years)"),
+  comparison(var = "age", outcome = "walking", design = subset_female),
+  data.frame(comparison = "Race and ethnicity"),
+  comparison(var = "raceeth", outcome = "walking", design = subset_female),
+  data.frame(comparison = "Education level"),
+  comparison(var = "edu", outcome = "walking", design = subset_female),
+  data.frame(comparison = "Body Mass Index category"),
+  comparison(var = "bmi", outcome = "walking", design = subset_female),
+  data.frame(comparison = "Metropolitan status"),
+  comparison(var = "msa", outcome = "walking", design = subset_female)) %>%
+  filter(stat_sig %in% c(NA,TRUE)) %>% 
+  select(-stat_sig)
 
-# Loop through each outcome and create the corresponding data frame
-for (i in outcomes_female) {
-  temp_tbl2 <- bind_rows(
-    stratifiedPrevalence(outcome = i, var = "age", text = "Age group (years)", design = subset_female),
-    stratifiedPrevalence(outcome = i, var = "raceeth", text = "Race and ethnicity", design = subset_female),
-    stratifiedPrevalence(outcome = i, var = "edu", text = "Education level", design = subset_female),
-    stratifiedPrevalence(outcome = i, var = "bmi", text = "Body Mass Index category", design = subset_female),
-    stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan Status", design = subset_female),
-    stratifiedPrevalence(outcome = i, var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female)
-    ) %>%
-    select(characteristic, prev) %>% # TODO change display to prev if don't want p-values 
-    rename(!!i := prev) # Use !! to dynamically name the column
-  
-  # Merge the temporary table into the main data frame
-  tbl2 <- full_join(tbl2, temp_tbl2, by = "characteristic")
-}
-
-rm(i, temp_tbl2)
-
-# make flextable
-tbl2_ft <- flextable(tbl2) %>% 
-  autofit(add_w=0) %>%
-  add_header_row(values = c("", "Weighted prevalence of physical activity, % (95% CI)"),
-                 colwidths = c(1, tbl2 %>% ncol() - 1)) %>%
-  add_header_row(values = as_paragraph("Table 2. Females' five most common non-occupational physical activities, Behavioral Risk Factor Surveillance System — United States, 2023"),
-                 colwidths = tbl2 %>% ncol()) %>% 
-  set_header_labels(characteristic = "Characteristic",
-                    walking = "Walking",
-                    other = "Other",
-                    weightlifting = "Weight lifting",
-                    household = "Household activities",
-                    yoga = "Yoga, Pilates, or Tai Chi",
-                    gardening = "Gardening or yard work",
-                    running = "Running or jogging",
-                    bicycling = "Bicycling or bicycling machine exercise",
-                    aerobics = "Aerobics video or class",
-                    calisthenics = "Calisthenics",
-                    elliptical = "Elliptical/EFX machine") %>% 
-  flextable::footnote(i = c(1),
-                      j = c(1),
-                      value = as_paragraph(c(
-                        "If participants reported any past-month, non-occupational physical activity, they then described the type of their two most common activities.")),
-                      part = "header",
-                      ref_symbols = c("a")) %>%
-    flextable::footnote(i = 2,
-                      j = 2,
-                      part = "header",
-                      value = as_paragraph(c("There were differences in prevelance for the five activities by all characteristics (weighted chi square-test p-value <0.001).")), 
-                      ref_symbols = c("b")) %>%
-  flextable::footnote(i = 3,
-                      j = 1,
-                      part = "header",
-                      value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")), 
-                      ref_symbols = c("c")) %>%
-  flextable::footnote(i = which(tbl2 == "—", arr.ind = TRUE)[, 1], 
-                      j = which(tbl2 == "—", arr.ind = TRUE)[, 2],
-                      part = "body",
-                      value = as_paragraph(c(
-                        "This estimate is not presented because it has a relative standard error >30%.")),
-                      ref_symbols = c("d")) %>% 
-  italic(i = which(!grepl("–", tbl2$walking)), # italics
-         j = NULL) %>%
-  padding(i = which(grepl("–", tbl2$walking)), # indent
+# make into flextable
+tbl2_pairwise_female_ft <- tbl2_pairwise_female %>% 
+  flextable() %>%
+  add_header_row(values = as_paragraph("Statistically significant pairwise comparisons for FEMALES for Table 2"),
+                 colwidths = ncol(tbl2_pairwise_female)) %>% 
+  set_header_labels(comparison = "Characteristic and comparisons",
+                    pvalue = "p-value") %>% 
+  italic(i = c(which(is.na(tbl2_pairwise_female$pvalue))),
+         j = 1) %>% 
+  padding(i = c(which(tbl2_pairwise_female$pvalue != "")),
           j = 1,
           padding.left = 20) %>%
+  flextable::footnote(i = c(1),
+                      j = c(1),
+                      part = "header",
+                      value = as_paragraph(c("The asterisk (*) denotes statistical significance in t-testing with Bonferroni correction.")),
+                      ref_symbols = c("a")) %>%
   padding(padding.top = 0, padding.bottom = 0) %>% 
-  autofit(add_w = 0) %>%
-  flextable::fontsize(size = 10, part = "all") %>%
-  font(part = "all", fontname = "Arial") %>% 
+  flextable::fontsize(size = 9, part="all") %>%
+  font(part="all", fontname = "Arial") %>%
   set_table_properties(layout = "autofit") %>% 
   theme_vanilla()
 
-tbl2_ft
+tbl2_pairwise_female_ft
+
 ```
 
-## Table 3. Males' most common physical activities
+#### Among males
 
 ```{r}
 
-# MALES
+tbl2_pairwise_male <- bind_rows(
+  data.frame(comparison = "Age group (years)"),
+  comparison(var = "age", outcome = "walking", design = subset_male),
+  data.frame(comparison = "Race and ethnicity"),
+  comparison(var = "raceeth", outcome = "walking", design = subset_male),
+  data.frame(comparison = "Education level"),
+  comparison(var = "edu", outcome = "walking", design = subset_male),
+  data.frame(comparison = "Body Mass Index category"),
+  comparison(var = "bmi", outcome = "walking", design = subset_male),
+  data.frame(comparison = "Metropolitan status"),
+  comparison(var = "msa", outcome = "walking", design = subset_male)) %>%
+  filter(stat_sig %in% c(NA,TRUE)) %>% 
+  select(-stat_sig)
 
-# Initialize an empty data frame
-tbl3 <- data.frame(
-  characteristic = character(),
-  stringsAsFactors = FALSE
-)
-
-# Loop through each outcome and create the corresponding data frame
-for (i in outcomes_male) {
-  temp_tbl3 <- bind_rows(
-    stratifiedPrevalence(outcome = i, var = "age", text = "Age group (years)", design = subset_male),
-    stratifiedPrevalence(outcome = i, var = "raceeth", text = "Race and ethnicity", design = subset_male),
-    stratifiedPrevalence(outcome = i, var = "edu", text = "Education level", design = subset_male),
-    stratifiedPrevalence(outcome = i, var = "bmi", text = "Body Mass Index category", design = subset_male),
-    stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan Status", design = subset_male),
-    stratifiedPrevalence(outcome = i, var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male)
-    ) %>%
-    select(characteristic, display) %>% # TODO add pvalue column by changing prev to display?
-    rename(!!i := display) # Use !! to dynamically name the column
-  
-  # Merge the temporary table into the main data frame
-  tbl3 <- full_join(tbl3, temp_tbl3, by = "characteristic")
-}
-
-rm(i, temp_tbl3)
-
-# make flextable
-tbl3_ft <- flextable(tbl3) %>% 
-  autofit(add_w=0) %>%
-  add_header_row(values = c("", "Weighted chi-square p-value or weighted prevalence of physical activity, % (95% CI)"),
-                 colwidths = c(1, tbl3 %>% ncol() - 1)) %>%
-  add_header_row(values = as_paragraph("Table 3. Males' five most common non-occupational physical activities, Behavioral Risk Factor Surveillance System — United States, 2023"),
-                 colwidths = tbl3 %>% ncol()) %>% 
-  set_header_labels(characteristic = "Characteristic",
-                    walking = "Walking",
-                    other = "Other",
-                    weightlifting = "Weight lifting",
-                    household = "Household activities",
-                    yoga = "Yoga, Pilates, or Tai Chi",
-                    gardening = "Gardening or yard work",
-                    running = "Running or jogging",
-                    bicycling = "Bicycling or bicycling machine exercise",
-                    aerobics = "Aerobics video or class",
-                    calisthenics = "Calisthenics",
-                    elliptical = "Elliptical/EFX machine") %>% 
-  flextable::footnote(i = c(1),
-                      j = c(1),
-                      value = as_paragraph(c(
-                        "If participants reported any past-month, non-occupational physical activity, they then described the type of their two most common activities.")),
-                      part = "header",
-                      ref_symbols = c("a")) %>%
-    flextable::footnote(i = 3,
-                      j = 1,
-                      part = "header",
-                      value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")), 
-                      ref_symbols = c("b")) %>%
-  flextable::footnote(i = which(tbl3 == "—", arr.ind = TRUE)[, 1], 
-                      j = which(tbl3 == "—", arr.ind = TRUE)[, 2],
-                      part = "body",
-                      value = as_paragraph(c(
-                        "This estimate is not presented because it has a relative standard error >30%.")),
-                      ref_symbols = c("c")) %>% 
-  italic(i = which(!grepl("–", tbl3$walking)), # italics
-         j = NULL) %>%
-  padding(i = which(grepl("–", tbl3$walking)), # indent
+# make into flextable
+tbl2_pairwise_male_ft <- tbl2_pairwise_male %>% 
+  flextable() %>%
+  add_header_row(values = as_paragraph("Statistically significant pairwise comparisons for MALES for Table 2"),
+                 colwidths = ncol(tbl2_pairwise_male)) %>% 
+  set_header_labels(comparison = "Characteristic and comparisons",
+                    pvalue = "p-value") %>% 
+  italic(i = c(which(is.na(tbl2_pairwise_male$pvalue))),
+         j = 1) %>% 
+  padding(i = c(which(tbl2_pairwise_male$pvalue != "")),
           j = 1,
           padding.left = 20) %>%
+  flextable::footnote(i = c(1),
+                      j = c(1),
+                      part = "header",
+                      value = as_paragraph(c("The asterisk (*) denotes statistical significance in t-testing with Bonferroni correction.")),
+                      ref_symbols = c("a")) %>%
   padding(padding.top = 0, padding.bottom = 0) %>% 
-  autofit(add_w = 0) %>%
-  flextable::fontsize(size = 10, part = "all") %>%
-  font(part = "all", fontname = "Arial") %>% 
+  flextable::fontsize(size = 9, part="all") %>%
+  font(part="all", fontname = "Arial") %>%
   set_table_properties(layout = "autofit") %>% 
   theme_vanilla()
 
-tbl3_ft
+tbl2_pairwise_male_ft
+
 ```
+
+
+<!-- ## Table 2. Females' most common physical activities -->
+
+<!-- ```{r} -->
+<!-- # outcomes for both Table 2 and 3 -->
+<!-- outcomes <- c("walking", -->
+<!--               "other", -->
+<!--               "weightlifting", -->
+<!--               "gardening", -->
+<!--               "running", -->
+<!--               "bicycling", -->
+<!--               "household", -->
+<!--               "yoga", -->
+<!--               "calisthenics", -->
+<!--               "aerobics", -->
+<!--               "elliptical") -->
+
+<!-- outcomes_female <- c("walking", -->
+<!--               "gardening", -->
+<!--               "weightlifting", -->
+<!--               "running", -->
+<!--               "household") -->
+
+<!-- outcomes_male <- c("walking", -->
+<!--               "weightlifting", -->
+<!--               "running", -->
+<!--               "gardening", -->
+<!--               "bicycling") -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- # FEMALES -->
+
+<!-- # Initialize an empty data frame -->
+<!-- tbl2 <- data.frame( -->
+<!--   characteristic = character(), -->
+<!--   stringsAsFactors = FALSE -->
+<!-- ) -->
+
+<!-- # Loop through each outcome and create the corresponding data frame -->
+<!-- for (i in outcomes_female) { -->
+<!--   temp_tbl2 <- bind_rows( -->
+<!--     stratifiedPrevalence(outcome = i, var = "age", text = "Age group (years)", design = subset_female), -->
+<!--     stratifiedPrevalence(outcome = i, var = "raceeth", text = "Race and ethnicity", design = subset_female), -->
+<!--     stratifiedPrevalence(outcome = i, var = "edu", text = "Education level", design = subset_female), -->
+<!--     stratifiedPrevalence(outcome = i, var = "bmi", text = "Body Mass Index category", design = subset_female), -->
+<!--     stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan Status", design = subset_female), -->
+<!--     stratifiedPrevalence(outcome = i, var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female) -->
+<!--     ) %>% -->
+<!--     select(characteristic, prev) %>% # TODO change display to prev if don't want p-values  -->
+<!--     rename(!!i := prev) # Use !! to dynamically name the column -->
+
+<!--   # Merge the temporary table into the main data frame -->
+<!--   tbl2 <- full_join(tbl2, temp_tbl2, by = "characteristic") -->
+<!-- } -->
+
+<!-- rm(i, temp_tbl2) -->
+
+<!-- # make flextable -->
+<!-- tbl2_ft <- flextable(tbl2) %>%  -->
+<!--   autofit(add_w=0) %>% -->
+<!--   add_header_row(values = c("", "Weighted prevalence of physical activity, % (95% CI)"), -->
+<!--                  colwidths = c(1, tbl2 %>% ncol() - 1)) %>% -->
+<!--   add_header_row(values = as_paragraph("Table 2. Females' five most common non-occupational physical activities, Behavioral Risk Factor Surveillance System — United States, 2023"), -->
+<!--                  colwidths = tbl2 %>% ncol()) %>%  -->
+<!--   set_header_labels(characteristic = "Characteristic", -->
+<!--                     walking = "Walking", -->
+<!--                     other = "Other", -->
+<!--                     weightlifting = "Weight lifting", -->
+<!--                     household = "Household activities", -->
+<!--                     yoga = "Yoga, Pilates, or Tai Chi", -->
+<!--                     gardening = "Gardening or yard work", -->
+<!--                     running = "Running or jogging", -->
+<!--                     bicycling = "Bicycling or bicycling machine exercise", -->
+<!--                     aerobics = "Aerobics video or class", -->
+<!--                     calisthenics = "Calisthenics", -->
+<!--                     elliptical = "Elliptical/EFX machine") %>%  -->
+<!--   flextable::footnote(i = c(1), -->
+<!--                       j = c(1), -->
+<!--                       value = as_paragraph(c( -->
+<!--                         "If participants reported any past-month, non-occupational physical activity, they then described the type of their two most common activities.")), -->
+<!--                       part = "header", -->
+<!--                       ref_symbols = c("a")) %>% -->
+<!--     flextable::footnote(i = 2, -->
+<!--                       j = 2, -->
+<!--                       part = "header", -->
+<!--                       value = as_paragraph(c("There were differences in prevelance for the five activities by all characteristics (weighted chi square-test p-value <0.001).")),  -->
+<!--                       ref_symbols = c("b")) %>% -->
+<!--   flextable::footnote(i = 3, -->
+<!--                       j = 1, -->
+<!--                       part = "header", -->
+<!--                       value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")),  -->
+<!--                       ref_symbols = c("c")) %>% -->
+<!--   flextable::footnote(i = which(tbl2 == "—", arr.ind = TRUE)[, 1],  -->
+<!--                       j = which(tbl2 == "—", arr.ind = TRUE)[, 2], -->
+<!--                       part = "body", -->
+<!--                       value = as_paragraph(c( -->
+<!--                         "This estimate is not presented because it has a relative standard error >30%.")), -->
+<!--                       ref_symbols = c("d")) %>%  -->
+<!--   italic(i = which(!grepl("–", tbl2$walking)), # italics -->
+<!--          j = NULL) %>% -->
+<!--   padding(i = which(grepl("–", tbl2$walking)), # indent -->
+<!--           j = 1, -->
+<!--           padding.left = 20) %>% -->
+<!--   padding(padding.top = 0, padding.bottom = 0) %>%  -->
+<!--   autofit(add_w = 0) %>% -->
+<!--   flextable::fontsize(size = 10, part = "all") %>% -->
+<!--   font(part = "all", fontname = "Arial") %>%  -->
+<!--   set_table_properties(layout = "autofit") %>%  -->
+<!--   theme_vanilla() -->
+
+<!-- tbl2_ft -->
+<!-- ``` -->
+
+<!-- ## Table 3. Males' most common physical activities -->
+
+<!-- ```{r} -->
+
+<!-- # MALES -->
+
+<!-- # Initialize an empty data frame -->
+<!-- tbl3 <- data.frame( -->
+<!--   characteristic = character(), -->
+<!--   stringsAsFactors = FALSE -->
+<!-- ) -->
+
+<!-- # Loop through each outcome and create the corresponding data frame -->
+<!-- for (i in outcomes_male) { -->
+<!--   temp_tbl3 <- bind_rows( -->
+<!--     stratifiedPrevalence(outcome = i, var = "age", text = "Age group (years)", design = subset_male), -->
+<!--     stratifiedPrevalence(outcome = i, var = "raceeth", text = "Race and ethnicity", design = subset_male), -->
+<!--     stratifiedPrevalence(outcome = i, var = "edu", text = "Education level", design = subset_male), -->
+<!--     stratifiedPrevalence(outcome = i, var = "bmi", text = "Body Mass Index category", design = subset_male), -->
+<!--     stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan Status", design = subset_male), -->
+<!--     stratifiedPrevalence(outcome = i, var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male) -->
+<!--     ) %>% -->
+<!--     select(characteristic, display) %>% # TODO add pvalue column by changing prev to display? -->
+<!--     rename(!!i := display) # Use !! to dynamically name the column -->
+
+<!--   # Merge the temporary table into the main data frame -->
+<!--   tbl3 <- full_join(tbl3, temp_tbl3, by = "characteristic") -->
+<!-- } -->
+
+<!-- rm(i, temp_tbl3) -->
+
+<!-- # make flextable -->
+<!-- tbl3_ft <- flextable(tbl3) %>%  -->
+<!--   autofit(add_w=0) %>% -->
+<!--   add_header_row(values = c("", "Weighted chi-square p-value or weighted prevalence of physical activity, % (95% CI)"), -->
+<!--                  colwidths = c(1, tbl3 %>% ncol() - 1)) %>% -->
+<!--   add_header_row(values = as_paragraph("Table 3. Males' five most common non-occupational physical activities, Behavioral Risk Factor Surveillance System — United States, 2023"), -->
+<!--                  colwidths = tbl3 %>% ncol()) %>%  -->
+<!--   set_header_labels(characteristic = "Characteristic", -->
+<!--                     walking = "Walking", -->
+<!--                     other = "Other", -->
+<!--                     weightlifting = "Weight lifting", -->
+<!--                     household = "Household activities", -->
+<!--                     yoga = "Yoga, Pilates, or Tai Chi", -->
+<!--                     gardening = "Gardening or yard work", -->
+<!--                     running = "Running or jogging", -->
+<!--                     bicycling = "Bicycling or bicycling machine exercise", -->
+<!--                     aerobics = "Aerobics video or class", -->
+<!--                     calisthenics = "Calisthenics", -->
+<!--                     elliptical = "Elliptical/EFX machine") %>%  -->
+<!--   flextable::footnote(i = c(1), -->
+<!--                       j = c(1), -->
+<!--                       value = as_paragraph(c( -->
+<!--                         "If participants reported any past-month, non-occupational physical activity, they then described the type of their two most common activities.")), -->
+<!--                       part = "header", -->
+<!--                       ref_symbols = c("a")) %>% -->
+<!--     flextable::footnote(i = 3, -->
+<!--                       j = 1, -->
+<!--                       part = "header", -->
+<!--                       value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")),  -->
+<!--                       ref_symbols = c("b")) %>% -->
+<!--   flextable::footnote(i = which(tbl3 == "—", arr.ind = TRUE)[, 1],  -->
+<!--                       j = which(tbl3 == "—", arr.ind = TRUE)[, 2], -->
+<!--                       part = "body", -->
+<!--                       value = as_paragraph(c( -->
+<!--                         "This estimate is not presented because it has a relative standard error >30%.")), -->
+<!--                       ref_symbols = c("c")) %>%  -->
+<!--   italic(i = which(!grepl("–", tbl3$walking)), # italics -->
+<!--          j = NULL) %>% -->
+<!--   padding(i = which(grepl("–", tbl3$walking)), # indent -->
+<!--           j = 1, -->
+<!--           padding.left = 20) %>% -->
+<!--   padding(padding.top = 0, padding.bottom = 0) %>%  -->
+<!--   autofit(add_w = 0) %>% -->
+<!--   flextable::fontsize(size = 10, part = "all") %>% -->
+<!--   font(part = "all", fontname = "Arial") %>%  -->
+<!--   set_table_properties(layout = "autofit") %>%  -->
+<!--   theme_vanilla() -->
+
+<!-- tbl3_ft -->
+<!-- ``` -->
