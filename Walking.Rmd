@@ -630,6 +630,7 @@ stratifiedPrevalence <- function(outcome, var, text = NA, design) {
 
 ### Pairwise comparisons
 
+#### List the comparisons and test results
 ```{r}
 
 # pairwise testing
@@ -691,7 +692,131 @@ comparison <- function(var, outcome, design) {
 }
 ```
 
+#### Add superscripts for table
 
+```{r}
+# function to list the subgroup with superscripts for the for pairwise survey t-tests with Bonferroni correction  
+
+comparison_superscript <- function(var, outcome, design) {
+  
+  # Ensure grouping variable is factor
+  design$variables[[var]] <- as.factor(design$variables[[var]])
+  
+  # # ----------------------------
+  # # Outcome preparation
+  # # ----------------------------
+  #   <- unique(na.omit(design$variables[[outcome]]))
+  # 
+  # if (all(outcome_vals %in% c(1, 2))) {
+  #   design$variables[[outcome]] <- ifelse(design$variables[[outcome]] == 1, 1,
+  #                                         ifelse(design$variables[[outcome]] == 2, 0, NA))
+  #   design$variables[[outcome]] <- as.logical(design$variables[[outcome]])
+  #   
+  # } else if (all(outcome_vals %in% c(0, 1))) {
+  #   design$variables[[outcome]] <- as.logical(design$variables[[outcome]])
+  #   
+  # } else {
+  #   warning(paste("Unexpected outcome coding in", outcome))
+  # }
+  
+  # ------------------------------------------------------------------
+  # Create Formulas, get levels of var, and establish pairs 
+  # ------------------------------------------------------------------
+  formula <- as.formula(paste(outcome, "~", var))
+  levels_var <- levels(design$variables[[var]])
+  
+  if (length(levels_var) < 2) stop("Not enough levels to compare.")
+  
+  pairs <- combn(levels_var, 2, simplify = FALSE)
+  bonf_cutoff <- 0.05 / length(pairs)
+  
+  # --------------------------------------------------------------
+  # Calculate Pairwise survey t-tests / p_values
+  # --------------------------------------------------------------
+  pairwise_results <- map_dfr(pairs, ~ {
+    
+    g1 <- .x[1] # 1st group to compare
+    g2 <- .x[2] # 2nd group to compare
+    comparison_name <- paste(.x, collapse = " vs ") # text to describe which groups are compared
+    
+    # Subset the design data.frame for the current pair    
+    subset_data <- subset(design, design$variables[[var]] %in% .x) # previously c(g1, g2)), but .x is cleaner
+    
+    # Perform the svyttest
+    p.value <- svyttest(formula, subset_data)$p.value
+    
+    # format p-value to 3 decimal places, show "<0.001" if below that  / add asterisk if significant
+    pvalue <- if (!is.na(p.value)) {
+      if (p.value < 0.001) {
+        formatted <- "<0.001"
+      } else {
+        formatted <- formatC(p.value, digits = 3, format = "f")
+      }
+      if (p.value < bonf_cutoff) paste0(formatted, "*") else formatted
+    } else {
+      NA_character_
+    }
+    
+    tibble(
+      variable = var,
+      outcome = outcome,
+      group1 = g1,
+      group2 = g2,
+      comparison = comparison_name,
+      pvalue = pvalue,
+      stat_sig = ifelse(!is.na(p.value) & p.value < bonf_cutoff, TRUE, FALSE),
+      bonferroni_cutoff = bonf_cutoff
+    )
+  })
+  
+  # --------------------------------------------------------------
+  # Work toward adding superscripts based on the testing
+  # --------------------------------------------------------------
+  
+  # Create a matrix to track connections between groups
+  connection_matrix <- matrix(FALSE, nrow = length(levels_var), ncol = length(levels_var),
+                              dimnames = list(levels_var, levels_var))
+  
+  # Fill the connection matrix based on significant pairwise results
+  for (i in seq_len(nrow(pairwise_results))) {
+    if (!is.na(pairwise_results$stat_sig[i]) && pairwise_results$stat_sig[i]) {
+      g1 <- pairwise_results$group1[i]
+      g2 <- pairwise_results$group2[i]
+      connection_matrix[g1, g2] <- TRUE
+      connection_matrix[g2, g1] <- TRUE
+    }
+  }
+  
+  # Create a list to hold the superscripts for each group
+  final_superscripts <- tibble(
+    # variable = var,
+    characteristic = levels_var,
+    superscript = setNames(as.list(rep("", length(levels_var))), levels_var)
+  )
+  
+  # Assign letters for superscripts
+  letters_used <- letters[1:nrow(pairwise_results)]
+  letter_counter <- 1
+  
+  # Assign superscripts based on connections 
+  for (i in seq_along(levels_var)) {
+    for (j in seq_along(levels_var)) {
+      if (i < j && connection_matrix[i,j]) {
+        final_superscripts$superscript[i] <- str_c(final_superscripts$superscript[i], letters_used[letter_counter])
+        final_superscripts$superscript[j] <- str_c(final_superscripts$superscript[j], letters_used[letter_counter])
+        letter_counter <- letter_counter + 1
+      }
+    }
+  }
+  
+  # Combine the results with the pairwise results
+  output <- final_superscripts %>%
+    mutate( #outcome = outcome,
+           superscript = unlist(superscript))
+  
+  return(output)
+}
+```
 # Results
 
 ## Sample flow
@@ -930,37 +1055,57 @@ svyttest(formula = elliptical ~ sex, design = subset) # only one that is >0.05
 
 ```{r}
 
-# TODO change n to numerator or remove n columns
 tbl2_female <- bind_rows(
     stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_female),
     stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_female),
     stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_female),
     stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body Mass Index category", design = subset_female),
-    stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan Status", design = subset_female)) %>% 
-  select(characteristic, counts, prev) %>% 
-  rename(counts_female = counts,
-         prev_female = prev)
+    stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan Status", design = subset_female))  |> 
+  full_join(
+    bind_rows(
+      comparison_superscript(outcome = "walking", var = "age", design = subset_female),
+      comparison_superscript(outcome = "walking", var = "raceeth", design = subset_female),
+      comparison_superscript(outcome = "walking", var = "edu", design = subset_female),
+      comparison_superscript(outcome = "walking", var = "bmi", design = subset_female),
+      comparison_superscript(outcome = "walking", var = "msa", design = subset_female)),
+    by = join_by(characteristic)) |>   
+  select(characteristic, 
+         # counts, 
+         prev,
+         superscript) |> 
+  rename(#counts_female = counts,
+         prev_female = prev,
+         superscript_female = superscript)
 
 tbl2_male <- bind_rows(
     stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_male),
     stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_male),
     stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_male),
     stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body Mass Index category", design = subset_male),
-    stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan Status", design = subset_male)) %>% 
-  select(characteristic, counts, prev) %>% 
-  rename(counts_male = counts,
-         prev_male = prev)
-
-tbl2 <- left_join(tbl2_female, tbl2_male,
-                  by = "characteristic")
+    stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan Status", design = subset_male))  |> 
+  full_join(
+    bind_rows(
+      comparison_superscript(outcome = "walking", var = "age", design = subset_male),
+      comparison_superscript(outcome = "walking", var = "raceeth", design = subset_male),
+      comparison_superscript(outcome = "walking", var = "edu", design = subset_male),
+      comparison_superscript(outcome = "walking", var = "bmi", design = subset_male),
+      comparison_superscript(outcome = "walking", var = "msa", design = subset_male)),
+    by = join_by(characteristic)) |>   
+  select(characteristic, 
+         # counts, 
+         prev,
+         superscript) |> 
+  rename(#counts_male = counts,
+         prev_male = prev,
+         superscript_male = superscript)
 
 tbl2_ft <- tbl2 %>% 
   flextable() %>% 
   set_header_labels(
     characteristic = "Characteristic",
-    counts_female = "n",
+    # counts_female = "n",
     prev_female = "% (95% CI)",
-    counts_male = "n",
+    # counts_male = "n",
     prev_male = "% (95% CI)") %>%
   add_header_row(values = c("", 
                             paste0("Females (n = ", df %>% filter(include == TRUE & sex == "Female") %>% nrow() %>% sjmisc::big_mark(), ")"), 
@@ -968,9 +1113,9 @@ tbl2_ft <- tbl2 %>%
                  colwidths = c(1, 2, 2)) %>% 
   add_header_row(values = paste0("Table 2. Prevalence of walking among adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
                  colwidths = tbl2 %>% ncol()) %>% 
-  italic(i = c(which(is.na(tbl2$counts_female))), # italics for readability
+  italic(i = c(which(tbl2$prev_female == "")), # italics for readability
          j = 1) %>% 
-  padding(i = c(which(!is.na(tbl2$counts_female))), # indent for readability
+  padding(i = c(which(tbl2$prev_female == "")), # indent for readability
           j = 1,
           padding.left = 20) %>%
   padding(padding.top = 0, padding.bottom = 0) %>% 
@@ -1004,7 +1149,7 @@ tbl2_ft <- tbl2 %>%
 tbl2_ft
 ```
 
-### Pairwise comparisons. These tables wil not be in the paper, but we will add symbols to Table 2 depecting the statistically significant differences.
+### Pairwise comparisons. These tables wil not be in the paper, but we will add symbols to Table 2 depicting the statistically significant differences.
 
 #### Among females
 
