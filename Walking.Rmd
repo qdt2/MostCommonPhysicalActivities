@@ -28,6 +28,7 @@ library(srvyr)
 library(flextable)
 library(patchwork)
 library(sjmisc)
+library(officer)
 
 # no scientific notation
 options(scipen=999)
@@ -697,7 +698,9 @@ comparison <- function(var, outcome, design) {
 ```{r}
 # function to list the subgroup with superscripts for the for pairwise survey t-tests with Bonferroni correction  
 
-comparison_superscript <- function(var, outcome, design) {
+## start argument is which number (corresponding to order of letters of the alphabet) to use for superscripts. For example, start = 2 would start superscripts with "b"
+
+comparison_superscript <- function(var, outcome, design, start = 3) {
   
   # Ensure grouping variable is factor
   design$variables[[var]] <- as.factor(design$variables[[var]])
@@ -795,7 +798,9 @@ comparison_superscript <- function(var, outcome, design) {
   )
   
   # Assign letters for superscripts
-  letters_used <- letters[1+2:nrow(pairwise_results)] # TODO add number based on # of footnotes to start on a later letter
+  
+  end = nrow(pairwise_results) + start - 1
+  letters_used <- letters[start:end]
   letter_counter <- 1
   
   # Assign superscripts based on connections 
@@ -814,9 +819,15 @@ comparison_superscript <- function(var, outcome, design) {
     mutate( #outcome = outcome,
            superscript = unlist(superscript))
   
-  return(output)
+  if (any(is.na(output$superscript))) {
+    warning(paste("Missing values in superscript columns"))
+  } else {
+    return(output)
+  }
+  
 }
 ```
+
 # Results
 
 ## Sample flow
@@ -870,7 +881,29 @@ t.test(data = df5, include ~ msa)
 
 # Table 1
 
-# total for all
+# a first row with overall # and %s
+overallRow <- overallPrevalence(var = "sex", text = "Overall weighted % for sex", design = subset) |> 
+  select(characteristic, counts, display) |> 
+  filter(characteristic != "Overall weighted % for sex") %>%
+  pivot_wider(
+    names_from = characteristic,
+    values_from = c(counts, display)) |> 
+  mutate(characteristic = "Overall", # add columns
+         display = "100",
+         counts = unwtd.count(~one, design = subset) |> as.numeric()) |> 
+  rename(counts_female = counts_Female, # make columns lower case
+         display_female = display_Female,
+         counts_male = counts_Male,
+         display_male = display_Male) |> 
+  select(characteristic, # re-order columns
+         counts, 
+         display,
+         counts_female, 
+         display_female, 
+         counts_male, 
+         display_male)
+
+# total for entire sample
 tbl1_total <- bind_rows(
   bind_rows(
     overallPrevalence(var = "age", text = "Age group (years)", design = subset),
@@ -954,10 +987,13 @@ tbl1_male <- bind_rows(
          display_male = display)
 
 # join
-tbl1 <- left_join(tbl1_total, tbl1_female,
-                  by = "characteristic") %>% 
-  left_join(tbl1_male, 
-            by = "characteristic")
+tbl1 <- bind_rows(
+  overallRow,
+  (left_join(tbl1_total, 
+             tbl1_female,
+             by = "characteristic") %>%
+     left_join(tbl1_male,
+               by = "characteristic")))
 
 # # table if not stratifying
 # tbl1_ft <- tbl1_total %>% 
@@ -992,15 +1028,18 @@ tbl1_ft <- tbl1 %>%
     counts_male = "n",
     display_male = "% (95% CI)") %>%
   add_header_row(values = c("", 
-                            paste0("Total (n = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), ")"),  
-                            paste0("Females (n = ", df %>% filter(include == TRUE & sex == "Female") %>% nrow() %>% sjmisc::big_mark(), ")"), 
-                            paste0("Males (n = ", df %>% filter(include == TRUE & sex == "Male") %>% nrow() %>% sjmisc::big_mark(), ")")), 
+                            "Total",
+                            "Females",
+                            "Males"),
+                            # paste0("Total (n = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), ")"),  
+                            # paste0("Females (n = ", df %>% filter(include == TRUE & sex == "Female") %>% nrow() %>% sjmisc::big_mark(), ")"), 
+                            # paste0("Males (n = ", df %>% filter(include == TRUE & sex == "Male") %>% nrow() %>% sjmisc::big_mark(), ")")), 
                  colwidths = c(1, 2, 2, 2)) %>% 
   add_header_row(values = paste0("Table 1. Sample characteristics of US adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
                  colwidths = tbl1 %>% ncol()) %>% 
   italic(i = c(which(is.na(tbl1$counts))), # italics for readability
          j = 1) %>% 
-  padding(i = c(which(!is.na(tbl1$counts))), # indent for readability
+  padding(i = c(which(tbl1$characteristic != "Overall" & !is.na(tbl1$counts))), # indent for readability
           j = 1,
           padding.left = 20) %>%
   padding(padding.top = 0, padding.bottom = 0) %>% 
@@ -1065,7 +1104,7 @@ tbl2_female <- bind_rows(
     bind_rows(
       comparison_superscript(outcome = "walking", var = "age", design = subset_female),
       comparison_superscript(outcome = "walking", var = "raceeth", design = subset_female),
-      comparison_superscript(outcome = "walking", var = "edu", design = subset_female),
+      comparison_superscript(outcome = "walking", var = "edu", design = subset_female), 
       comparison_superscript(outcome = "walking", var = "bmi", design = subset_female),
       comparison_superscript(outcome = "walking", var = "msa", design = subset_female)),
     by = join_by(characteristic)) |>   
@@ -1120,9 +1159,9 @@ tbl2_ft <- tbl2 %>%
   set_header_labels(
     characteristic = "Characteristic",
     # counts_female = "n",
-    prev_female = paste0("Females (n = ", df %>% filter(include == TRUE & sex == "Female") %>% nrow() %>% sjmisc::big_mark(), ")"),
+    prev_female = "Females",
     # counts_male = "n",
-    prev_male = paste0("Males (n = ", df %>% filter(include == TRUE & sex == "Male") %>% nrow() %>% sjmisc::big_mark(), ")")) %>%
+    prev_male = "Males") %>%
   add_header_row(values = c("", 
                             "% (95% CI)"), 
                  colwidths = c(1, 2)) %>% 
@@ -1144,7 +1183,7 @@ tbl2_ft <- tbl2 %>%
                       part = "header",
                       value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")), 
                       ref_symbols = c("b")) %>%
-  flextable::add_footer_lines(values = "\U1D48\U207B\U1D56Within a characteristic, subgroup pairs with the same superscript letters are significantly different (p <0.05, Bonferroni-corrected pairwise t-tests).") %>%
+  flextable::add_footer_lines(values = "\U1D9C\U207B\U1D52Within a characteristic, subgroup pairs with the same superscript letters are significantly different (p <0.05, Bonferroni-corrected pairwise t-tests).") %>%
   autofit(add_w=0) %>%
   flextable::fontsize(size = 10, part="all") %>%
   font(part="all", fontname = "Arial") %>% 
@@ -1246,6 +1285,28 @@ tbl2_pairwise_male_ft
 
 ```
 
+# Save
+
+```{r}
+
+# Create openxlsx2 workbook and add sheets
+wb <- openxlsx2::wb_workbook()
+wb$add_worksheet("Table 1")
+wb$add_worksheet("Table 2")
+
+# add flextables to workbook
+wb <- flexlsx::wb_add_flextable(wb, "Table 1", tbl1_ft)
+wb <- flexlsx::wb_add_flextable(wb, "Table 2", tbl2_ft)
+# save the workbook
+wb$save(file = here::here("Output", "Walking_Tables.xlsx"))
+
+# save as Word doc
+read_docx() %>%
+  body_add_flextable(value = tbl1_ft) %>% 
+  body_add_break() %>%
+  body_add_flextable(value = tbl2_ft) %>%
+  print(target = here::here("Output", "Walking_Tables.docx"))
+```
 
 <!-- ## Table 2. Females' most common physical activities -->
 
