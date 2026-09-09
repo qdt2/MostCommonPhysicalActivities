@@ -1089,6 +1089,28 @@ svyttest(formula = aerobics ~ sex, design = subset)
 svyttest(formula = elliptical ~ sex, design = subset) # only one that is >0.05
 ```
 
+### Check numbers for running/jogging {.hidden .unlisted .unnumbered}
+
+```{r}
+
+# unweighted
+df |> filter(include == TRUE) |> 
+  tabyl(running)
+
+df |> filter(include == TRUE) |> 
+  tabyl(sex, running) |> 
+  adorn_percentages() |> 
+  adorn_pct_formatting(digits = 3) |> 
+  adorn_ns()
+
+# weighted
+svyby(formula = ~running, by = ~sex, design = subset,
+      svymean, vartype = "ci")
+svyby(formula = ~running, by = ~one, design = subset,
+      svymean, vartype = "ci")
+
+```
+
 
 ## Table 2. Prevalence of walking
 
@@ -1183,7 +1205,10 @@ tbl2_ft <- tbl2 %>%
                       part = "header",
                       value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")), 
                       ref_symbols = c("b")) %>%
-  flextable::add_footer_lines(values = "\U1D9C\U207B\U1D52Within a characteristic, subgroup pairs with the same superscript letters are significantly different (p <0.05, Bonferroni-corrected pairwise t-tests).") %>%
+    add_footer_lines(
+      value = as_paragraph(
+        as_sup("c-o"),
+        "Within a characteristic, subgroup pairs with the same superscript letters are significantly different (p <0.05, Bonferroni-corrected pairwise t-tests).")) %>% 
   autofit(add_w=0) %>%
   flextable::fontsize(size = 10, part="all") %>%
   font(part="all", fontname = "Arial") %>% 
@@ -1285,7 +1310,7 @@ tbl2_pairwise_male_ft
 
 ```
 
-# Save
+# Save {.hidden .unlisted .unnumbered}
 
 ```{r}
 
