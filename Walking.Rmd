@@ -1051,7 +1051,7 @@ tbl1_ft <- tbl1 %>%
   flextable::footnote(i = 3,
                       j = 1,
                       part = "header",
-                      value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")), 
+                      value = as_paragraph(c("Participants missing data on a characteristic were excluded from analysis of that characteristic.")), 
                       ref_symbols = c("b")) %>%
   flextable::footnote(i = which(tbl1 == "Physical Activity"),
                       j = 1,
@@ -1116,6 +1116,30 @@ svyby(formula = ~running, by = ~one, design = subset,
 
 ```{r}
 
+# entire sample
+tbl2_total <- bind_rows(
+  stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset),
+  stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset),
+  stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset),
+  stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body Mass Index category", design = subset),
+  stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan Status", design = subset))  |> 
+  full_join(
+    bind_rows(
+      comparison_superscript(outcome = "walking", var = "age", design = subset),
+      comparison_superscript(outcome = "walking", var = "raceeth", design = subset),
+      comparison_superscript(outcome = "walking", var = "edu", design = subset), 
+      comparison_superscript(outcome = "walking", var = "bmi", design = subset),
+      comparison_superscript(outcome = "walking", var = "msa", design = subset)),
+    by = join_by(characteristic)) |>   
+  select(characteristic, 
+         # counts, 
+         prev,
+         superscript) |> 
+  rename(#counts_total = counts,
+    prev_total = prev,
+    superscript_total = superscript)
+
+# females only
 tbl2_female <- bind_rows(
     stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_female),
     stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_female),
@@ -1138,6 +1162,7 @@ tbl2_female <- bind_rows(
          prev_female = prev,
          superscript_female = superscript)
 
+# males only
 tbl2_male <- bind_rows(
     stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_male),
     stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_male),
@@ -1160,11 +1185,22 @@ tbl2_male <- bind_rows(
          prev_male = prev,
          superscript_male = superscript)
 
-tbl2 <- left_join(tbl2_female, tbl2_male,
-                  by = "characteristic")
+# join
+tbl2 <- full_join(tbl2_total,
+                  tbl2_female,
+                  by = join_by("characteristic")) |>
+  full_join(tbl2_male,
+            by = join_by("characteristic"))
 
+# make flextable
 tbl2_ft <- tbl2 %>% 
   flextable() %>%
+  compose(part = "body",
+    i = ~ superscript_total != "",   # only rows needing superscript
+    j = 'prev_total',
+    value = as_paragraph(
+      as_chunk(prev_total),
+      as_sup(superscript_total))) %>% 
   compose(part = "body",
     i = ~ superscript_female != "",   # only rows needing superscript
     j = 'prev_female',
@@ -1177,18 +1213,19 @@ tbl2_ft <- tbl2 %>%
     value = as_paragraph(
       as_chunk(prev_male),
       as_sup(superscript_male))) %>%
-  delete_columns(c("superscript_female", "superscript_male")) %>%
+  delete_columns(c("superscript_total", "superscript_female", "superscript_male")) %>%
   set_header_labels(
     characteristic = "Characteristic",
+    prev_total = "Total",
     # counts_female = "n",
     prev_female = "Females",
     # counts_male = "n",
     prev_male = "Males") %>%
   add_header_row(values = c("", 
                             "% (95% CI)"), 
-                 colwidths = c(1, 2)) %>% 
+                 colwidths = c(1, 3)) %>% 
   add_header_row(values = paste0("Table 2. Weighted prevalence of walking among adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
-                 colwidths = tbl2 %>% ncol() - 2) %>%
+                 colwidths = tbl2 %>% ncol() - 3) %>%
   italic(i = c(which(tbl2$prev_female == "")), # italics for readability
          j = 1) %>% 
   padding(i = c(which(tbl2$prev_female != "")), # indent for readability
@@ -1203,7 +1240,7 @@ tbl2_ft <- tbl2 %>%
   flextable::footnote(i = 3,
                       j = 1,
                       part = "header",
-                      value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")), 
+                      value = as_paragraph(c("Participants missing data on a characteristic were excluded from analysis of that characteristic.")), 
                       ref_symbols = c("b")) %>%
     add_footer_lines(
       value = as_paragraph(
@@ -1423,7 +1460,7 @@ read_docx() %>%
 <!--   flextable::footnote(i = 3, -->
 <!--                       j = 1, -->
 <!--                       part = "header", -->
-<!--                       value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")),  -->
+<!--                       value = as_paragraph(c("Participants missing data on a characteristic were excluded from analysis of that characteristic.")),  -->
 <!--                       ref_symbols = c("c")) %>% -->
 <!--   flextable::footnote(i = which(tbl2 == "—", arr.ind = TRUE)[, 1],  -->
 <!--                       j = which(tbl2 == "—", arr.ind = TRUE)[, 2], -->
@@ -1505,7 +1542,7 @@ read_docx() %>%
 <!--     flextable::footnote(i = 3, -->
 <!--                       j = 1, -->
 <!--                       part = "header", -->
-<!--                       value = as_paragraph(c("Participants missing data on a characterstic were excluded from analysis of that characteristic.")),  -->
+<!--                       value = as_paragraph(c("Participants missing data on a characteristic were excluded from analysis of that characteristic.")),  -->
 <!--                       ref_symbols = c("b")) %>% -->
 <!--   flextable::footnote(i = which(tbl3 == "—", arr.ind = TRUE)[, 1],  -->
 <!--                       j = which(tbl3 == "—", arr.ind = TRUE)[, 2], -->
