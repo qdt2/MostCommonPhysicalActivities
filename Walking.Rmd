@@ -431,7 +431,7 @@ overallPrevalence <- function(var,
        mutate(
          # https://www.cdc.gov/brfss/annual_data/2023/pdf/Compare_2023-508.pdf
          suppress = case_when(
-           counts < 50 ~ "1. small n",
+           counts < 50 ~ "1. small n", # TODO check this
            se/mean > 0.3 ~ "2. wide RSE",
            TRUE ~ "3. present data"
          ),
@@ -621,7 +621,7 @@ stratifiedPrevalence <- function(outcome, var, text = NA, design) {
         p.value < 0.001 ~ "<0.001",
         TRUE ~ ""
       ),
-      suppress = # suppression flag
+      suppress = # suppression flag # TODO check this and other suppression
         case_when(
           counts < 30 ~ "1. small n",
           se/mean > 0.3 ~ "2. wide RSE",
@@ -723,7 +723,7 @@ comparison <- function(var, outcome, design) {
 
 ## start argument is which number (corresponding to order of letters of the alphabet) to use for superscripts. For example, start = 2 would start superscripts with "b"
 
-comparison_superscript <- function(var, outcome, design, start = 3) {
+comparison_superscript <- function(var, outcome, design, start = 4) {
   
   # Ensure grouping variable is factor
   design$variables[[var]] <- as.factor(design$variables[[var]])
@@ -850,6 +850,88 @@ comparison_superscript <- function(var, outcome, design, start = 3) {
   
 }
 ```
+
+### Adjusted prevalence ratios
+
+```{r}
+
+# to get dataframe for ggplot or column for table with aPR and CIs
+adjustedPR <- function(design) {
+  
+  # create logistic regression model
+  model <- (svyglm(walking ~ age + raceeth_hispanic + edu + bmi + msa_nonmetro,
+                        family = quasipoisson(log),
+                        design = design,
+                        na.action = na.omit))
+  # jtools::summ(model, confint = T)
+  # summary(model, correlation = TRUE) 
+  
+  # get df of aORs and CIs
+  pr_ci <- exp(cbind(OddsRatio = coef(model), # exponentiates coef to get OR
+                     confint(model))) %>% # get CIs
+    data.frame() %>% # make into dataframe
+    mutate(statsig = case_when(X97.5.. <1 & X2.5.. <1 ~ TRUE, # label for below null
+                               X97.5.. >1 & X2.5.. >1 ~ TRUE, # above null
+                               TRUE ~ FALSE),
+           referent = FALSE, # label for figure
+           display = paste0( # text in manuscript of OR & CI
+             formatC(OddsRatio, digits = 2, format = "f"),
+             " [",
+             formatC(X2.5.., digits = 2, format = "f"),
+             "–",
+             formatC(X97.5.., digits = 2, format = "f"),
+             "]"))
+  
+  # clean: add columns for variable name
+  pr_ci$characteristic <- rownames(pr_ci)
+  pr_ci$characteristic <- sub("sex|raceeth_hispanic|edu|age|msa_nonmetro|bmi", "", pr_ci$characteristic) # remove category name
+  pr_ci <- pr_ci %>% filter(characteristic != "(Intercept)") # not intercept
+
+# # remove the ones we need to suppress based on table 1
+# # TODO recode if this changes
+# fig1_female_aors <- fig1_female_aors %>% 
+#   filter(!characteristic %in%
+#            c("American Indian or Alaskan Native, non-Hispanic",
+#              "Native Hawaiian or other Pacific Islander, non-Hispanic",
+#              "Another single race, non-Hispanic"))
+  # add index
+  pr_ci <- tibble::rowid_to_column(pr_ci, "index_asc")
+  
+  # df for referent groups
+  ref <- data.frame(index_asc = c(0.5, 8.5, 12.5, 15.5, 19.5),
+                    characteristic = c("18–29",
+                            "Hispanic",
+                            "Did not graduate high school",
+                            "Underweight",
+                            "Nonmetropolitan counties"),
+                    OddsRatio = 1,
+                    X2.5.. = 0,
+                    X97.5.. = 0,
+                    display = "Referent",
+                    statsig = FALSE,
+                    referent = TRUE,
+                    stringsAsFactors = FALSE)
+  
+  # df for labels of characteristics
+  label <- data.frame(index_asc = c(0.45, 5.45, 12.45, 15.45, 18.45), 
+                             characteristic = c("Age group (years)", 
+                                     "Race and ethnicity", 
+                                     "Education level", 
+                                     "body mass index category",
+                                     "Metropolitan status"))
+
+  # combine with aORs, sort by index, create new index
+  output <- bind_rows(pr_ci, ref, label) |> 
+    mutate(index = rank(-index_asc)) |>  # add index for ggplot
+    arrange((index_asc)) |> 
+    select(-index_asc)
+  
+  return(output)
+
+  }
+  
+```
+
 
 # Results
 
@@ -979,8 +1061,8 @@ tbl1_total <- bind_rows(
   overallPrevalence(var = "age", text = "Age group (years)", design = subset),
   overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset),
   overallPrevalence(var = "edu", text = "Education level", design = subset),
-  overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset),
-  overallPrevalence(var = "bmi", text = "Body Mass Index category", design = subset)) %>% 
+  overallPrevalence(var = "msa", text = "Metropolitan status", design = subset),
+  overallPrevalence(var = "bmi", text = "body mass index category", design = subset)) %>% 
     select(characteristic, counts, display)
 
 # females
@@ -988,8 +1070,8 @@ tbl1_female <- bind_rows(
   overallPrevalence(var = "age", text = "Age group (years)", design = subset_female),
   overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset_female),
   overallPrevalence(var = "edu", text = "Education level", design = subset_female),
-  overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_female),
-  overallPrevalence(var = "bmi", text = "Body Mass Index category", design = subset_female)) %>%
+  overallPrevalence(var = "msa", text = "Metropolitan status", design = subset_female),
+  overallPrevalence(var = "bmi", text = "body mass index category", design = subset_female)) %>%
   select(characteristic, counts, display) %>% 
   rename(counts_female = counts,
          display_female = display)
@@ -999,8 +1081,8 @@ tbl1_male <- bind_rows(
   overallPrevalence(var = "age", text = "Age group (years)", design = subset_male),
   overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset_male),
   overallPrevalence(var = "edu", text = "Education level", design = subset_male),
-  overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_male),
-  overallPrevalence(var = "bmi", text = "Body Mass Index category", design = subset_male)) %>%
+  overallPrevalence(var = "msa", text = "Metropolitan status", design = subset_male),
+  overallPrevalence(var = "bmi", text = "body mass index category", design = subset_male)) %>%
   select(characteristic, counts, display) %>% 
   rename(counts_male = counts,
          display_male = display)
@@ -1049,7 +1131,7 @@ tbl1_ft <- tbl1 %>%
   flextable::footnote(i = 3,
                       j = 1,
                       part = "header",
-                      value = as_paragraph(c("Participants missing data on a characteristic were excluded from analysis of that characteristic.")), 
+                      value = as_paragraph(c("We excluded participants missing data on a characteristic from analysis of that characteristic.")), 
                       ref_symbols = c("b")) %>%
   autofit(add_w=0) %>%
   flextable::fontsize(size = 10, part="all") %>%
@@ -1132,7 +1214,7 @@ tbl2 <- left_join(tbl2_total,
 tbl2_ft <- tbl2 %>% 
   flextable() %>% 
   set_header_labels(
-    characteristic = "Characteristic",
+    characteristic = "Activity",
     counts = "n",
     display = "% (95% CI)",
     counts_female = "n",
@@ -1147,7 +1229,7 @@ tbl2_ft <- tbl2 %>%
                             paste0("Females (n = ", df %>% filter(include == TRUE & sex == "Female") %>% nrow() %>% sjmisc::big_mark(), ")"),
                             paste0("Males (n = ", df %>% filter(include == TRUE & sex == "Male") %>% nrow() %>% sjmisc::big_mark(), ")")),
                  colwidths = c(1, 2, 2, 2)) %>% 
-  add_header_row(values = paste0("Table 2. Weighted prevalence of no past-month physical activity and past-month physical activities outside of work, Behavioral Risk Factor Surveillance System — United States, 2023"),
+  add_header_row(values = paste0("Table 2. Weighted prevalence of no past-month, non-occupational physical activity and past-month, non-occupational physical activities, Behavioral Risk Factor Surveillance System — United States, 2023"),
                  colwidths = tbl2 %>% ncol()) %>% 
   italic(i = c(which(is.na(tbl2$counts))), # italics for readability
          j = 1) %>% 
@@ -1165,16 +1247,11 @@ tbl2_ft <- tbl2 %>%
                       part = "header",
                       value = as_paragraph(c("If participants reported any past-month, non-occupational physical activity, they then listed the types of the two activities they spent the most time doing in the past month.")), 
                       ref_symbols = c("b")) %>%
-  flextable::footnote(i = 3,
-                      j = 1,
-                      part = "header",
-                      value = as_paragraph(c("Participants missing data on a characteristic were excluded from analysis of that characteristic.")), 
-                      ref_symbols = c("c")) %>%
   flextable::footnote(i = which(tbl2$characteristic != "Elliptical/EFX machine"),
                       j = 1,
                       part = "body",
                       value = as_paragraph(c("There were differences in prevalence between females and males  (weighted t-test p-value <0.001).")), 
-                      ref_symbols = c("d")) %>%
+                      ref_symbols = c("c")) %>%
   autofit(add_w=0) %>%
   flextable::fontsize(size = 10, part="all") %>%
   font(part="all", fontname = "Arial") %>% 
@@ -1225,149 +1302,6 @@ svyby(formula = ~running, by = ~one, design = subset,
 
 ```
 
-## Table 3. Prevalence and aPRs for walking
-
-```{r}
-
-# entire sample
-tbl3_total <- bind_rows(
-  stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset),
-  stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset),
-  stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset),
-  stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan Status", design = subset),
-  stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body Mass Index category", design = subset))  |> 
-  full_join(
-    bind_rows(
-      comparison_superscript(outcome = "walking", var = "age", design = subset),
-      comparison_superscript(outcome = "walking", var = "raceeth", design = subset),
-      comparison_superscript(outcome = "walking", var = "edu", design = subset), 
-      comparison_superscript(outcome = "walking", var = "bmi", design = subset),
-      comparison_superscript(outcome = "walking", var = "msa", design = subset)),
-    by = join_by(characteristic)) |>   
-  select(characteristic, 
-         # counts, 
-         prev,
-         superscript) |> 
-  rename(#counts_total = counts,
-    prev_total = prev,
-    superscript_total = superscript)
-
-# females only
-tbl3_female <- bind_rows(
-    stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_female),
-    stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_female),
-    stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_female),
-    stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan Status", design = subset_female),
-    stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body Mass Index category", design = subset_female))  |> 
-  full_join(
-    bind_rows(
-      comparison_superscript(outcome = "walking", var = "age", design = subset_female),
-      comparison_superscript(outcome = "walking", var = "raceeth", design = subset_female),
-      comparison_superscript(outcome = "walking", var = "edu", design = subset_female), 
-      comparison_superscript(outcome = "walking", var = "bmi", design = subset_female),
-      comparison_superscript(outcome = "walking", var = "msa", design = subset_female)),
-    by = join_by(characteristic)) |>   
-  select(characteristic, 
-         # counts, 
-         prev,
-         superscript) |> 
-  rename(#counts_female = counts,
-         prev_female = prev,
-         superscript_female = superscript)
-
-# males only
-tbl3_male <- bind_rows(
-    stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_male),
-    stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_male),
-    stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_male),
-    stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan Status", design = subset_male),
-    stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body Mass Index category", design = subset_male))  |> 
-  full_join(
-    bind_rows(
-      comparison_superscript(outcome = "walking", var = "age", design = subset_male),
-      comparison_superscript(outcome = "walking", var = "raceeth", design = subset_male),
-      comparison_superscript(outcome = "walking", var = "edu", design = subset_male),
-      comparison_superscript(outcome = "walking", var = "bmi", design = subset_male),
-      comparison_superscript(outcome = "walking", var = "msa", design = subset_male)),
-    by = join_by(characteristic)) |>   
-  select(characteristic, 
-         # counts, 
-         prev,
-         superscript) |> 
-  rename(#counts_male = counts,
-         prev_male = prev,
-         superscript_male = superscript)
-
-# join
-tbl3 <- full_join(tbl3_total,
-                  tbl3_female,
-                  by = join_by("characteristic")) |>
-  full_join(tbl3_male,
-            by = join_by("characteristic"))
-
-# make flextable
-tbl3_ft <- tbl3 %>% 
-  flextable() %>%
-  compose(part = "body",
-    i = ~ superscript_total != "",   # only rows needing superscript
-    j = 'prev_total',
-    value = as_paragraph(
-      as_chunk(prev_total),
-      as_sup(superscript_total))) %>% 
-  compose(part = "body",
-    i = ~ superscript_female != "",   # only rows needing superscript
-    j = 'prev_female',
-    value = as_paragraph(
-      as_chunk(prev_female),
-      as_sup(superscript_female))) %>% 
-  compose(part = "body",
-    i = ~ superscript_male != "",   # only rows needing superscript
-    j = 'prev_male',
-    value = as_paragraph(
-      as_chunk(prev_male),
-      as_sup(superscript_male))) %>%
-  delete_columns(c("superscript_total", "superscript_female", "superscript_male")) %>%
-  set_header_labels(
-    characteristic = "Characteristic",
-    prev_total = "Total",
-    # counts_female = "n",
-    prev_female = "Females",
-    # counts_male = "n",
-    prev_male = "Males") %>%
-  add_header_row(values = c("", 
-                            "% (95% CI)"), 
-                 colwidths = c(1, 3)) %>% 
-  add_header_row(values = paste0("Table 2. Weighted prevalence of walking among adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
-                 colwidths = tbl3 %>% ncol() - 3) %>%
-  italic(i = c(which(tbl3$prev_female == "")), # italics for readability
-         j = 1) %>% 
-  padding(i = c(which(tbl3$prev_female != "")), # indent for readability
-          j = 1,
-          padding.left = 20) %>%
-  padding(padding.top = 0, padding.bottom = 0) %>% 
-  flextable::footnote(i = 1,
-                      j = 1,
-                      part = "header",
-                      value = as_paragraph(c("If participants reported any past-month, non-occupational physical activity, they then listed the types of the two activities they spent the most time doing in the past month. Walking was the most frequently reported of the two physical activities they spent the most time in the past month doing.")), 
-                      ref_symbols = c("a")) %>%
-  flextable::footnote(i = 3,
-                      j = 1,
-                      part = "header",
-                      value = as_paragraph(c("Participants missing data on a characteristic were excluded from analysis of that characteristic.")), 
-                      ref_symbols = c("b")) %>%
-    add_footer_lines(
-      value = as_paragraph(
-        as_sup("c-o"),
-        "Within a characteristic for each column, subgroup pairs with the same superscript letters are significantly different (p <0.05, Bonferroni-corrected pairwise t-tests).")) %>% 
-  autofit(add_w=0) %>%
-  flextable::fontsize(size = 10, part="all") %>%
-  font(part="all", fontname = "Arial") %>% 
-  set_table_properties(layout = "autofit") %>% 
-  theme_vanilla()
-
-tbl3_ft
-```
-
 ### Pairwise comparisons. These tables wil not be in the paper, but we will add symbols to Table 2 depicting the statistically significant differences.
 
 #### Among females
@@ -1381,7 +1315,7 @@ tbl2_pairwise_female <- bind_rows(
   comparison(var = "raceeth", outcome = "walking", design = subset_female),
   data.frame(comparison = "Education level"),
   comparison(var = "edu", outcome = "walking", design = subset_female),
-  data.frame(comparison = "Body Mass Index category"),
+  data.frame(comparison = "body mass index category"),
   comparison(var = "bmi", outcome = "walking", design = subset_female),
   data.frame(comparison = "Metropolitan status"),
   comparison(var = "msa", outcome = "walking", design = subset_female)) %>%
@@ -1426,7 +1360,7 @@ tbl2_pairwise_male <- bind_rows(
   comparison(var = "raceeth", outcome = "walking", design = subset_male),
   data.frame(comparison = "Education level"),
   comparison(var = "edu", outcome = "walking", design = subset_male),
-  data.frame(comparison = "Body Mass Index category"),
+  data.frame(comparison = "body mass index category"),
   comparison(var = "bmi", outcome = "walking", design = subset_male),
   data.frame(comparison = "Metropolitan status"),
   comparison(var = "msa", outcome = "walking", design = subset_male)) %>%
@@ -1460,99 +1394,197 @@ tbl2_pairwise_male_ft
 
 ```
 
-# Modeling
+## Table 3. Prevalence and aPRs for walking
 
-## Entire sample
-```{r}
-# mutivariable logistic regression
-model_total <- (svyglm(walking ~ sex + age + raceeth_hispanic + edu + bmi + msa,
-                       family = quasipoisson(log),
-                       design = subset,
-                       na.action = na.omit))
-```
-
-## Females
 ```{r}
 
-model_female <- (svyglm(walking ~ age + raceeth_hispanic + edu + bmi + msa_nonmetro,
-                        family = quasipoisson(log),
-                        design = subset_female,
-                        na.action = na.omit))
+# df with n's
+tbl3_n <- data.frame(
+  characteristic = "N used for analysis",
+  prev_total = df |> filter(include==TRUE) |> nrow(),
+  prev_female = df |> filter(include == TRUE & sex == "Female") |> nrow(),
+  pr_female = df |> 
+    filter(include == TRUE & sex == "Female" & complete.cases(walking, age, raceeth, edu, msa, bmi)) |>
+    nrow(),
+  prev_male = df |> filter(include == TRUE & sex == "Male") |> nrow(),
+  pr_male = df |> 
+    filter(include == TRUE & sex == "Male" & complete.cases(walking, age, raceeth, edu, msa, bmi)) |> nrow()) |> 
+  sjmisc::big_mark()
 
-# jtools::summ(model_female, confint = T)
-# summary(model, correlation = TRUE) 
+# entire sample
+tbl3_total <- bind_rows(
+  stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset),
+  stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset),
+  stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset),
+  stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan status", design = subset),
+  stratifiedPrevalence(outcome = "walking", var = "bmi", text = "body mass index category", design = subset))  |> 
+  full_join(
+    bind_rows(
+      comparison_superscript(outcome = "walking", var = "age", design = subset),
+      comparison_superscript(outcome = "walking", var = "raceeth", design = subset),
+      comparison_superscript(outcome = "walking", var = "edu", design = subset), 
+      comparison_superscript(outcome = "walking", var = "bmi", design = subset),
+      comparison_superscript(outcome = "walking", var = "msa", design = subset)),
+    by = join_by(characteristic)) |>   
+  select(characteristic, 
+         # counts, 
+         prev,
+         superscript) |> 
+  rename(#counts_total = counts,
+    prev_total = prev,
+    superscript_total = superscript)
 
-# get df of aORs and CIs
-fig1_female_aors <- exp(cbind(OddsRatio = coef(model_female), # exponentiates coef to get OR
-                           confint(model_female))) %>% # get CIs
-  data.frame() %>% # make into dataframe
-  mutate(statsig = case_when(X97.5.. <1 & X2.5.. <1 ~ TRUE, # label for below null
-                             X97.5.. >1 & X2.5.. >1 ~ TRUE, # above null
-                             TRUE ~ FALSE), 
-         referent = FALSE, # label for figure
-         female_display = paste0( # text in manuscript of OR & CI
-           formatC(OddsRatio, digits = 2, format = "f"),
-           " [",
-           formatC(X2.5.., digits = 2, format = "f"),
-           "–",
-           formatC(X97.5.., digits = 2, format = "f"),
-           "]")) 
-# clean: add columns for variable name
-fig1_female_aors$var <- rownames(fig1_female_aors)
-fig1_female_aors$var <- sub("sex|raceeth_hispanic|edu|age|msa_nonmetro|bmi", "", fig1_female_aors$var) # remove category name
-fig1_female_aors <- fig1_female_aors %>% filter(var != "(Intercept)") # not intercept
+# FEMALES
+## unadjusted prevalence
+tbl3_female_prev <- bind_rows(
+    stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_female),
+    stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_female),
+    stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_female),
+    stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan status", design = subset_female),
+    stratifiedPrevalence(outcome = "walking", var = "bmi", text = "body mass index category", design = subset_female))  |> 
+  full_join(
+    bind_rows(
+      comparison_superscript(outcome = "walking", var = "age", design = subset_female),
+      comparison_superscript(outcome = "walking", var = "raceeth", design = subset_female),
+      comparison_superscript(outcome = "walking", var = "edu", design = subset_female), 
+      comparison_superscript(outcome = "walking", var = "bmi", design = subset_female),
+      comparison_superscript(outcome = "walking", var = "msa", design = subset_female)),
+    by = join_by(characteristic)) |>   
+  select(characteristic, 
+         # counts, 
+         prev,
+         superscript) |> 
+  rename(#counts_female = counts,
+         prev_female = prev,
+         superscript_female = superscript)
+## adjusted PRs
+tbl3_female_pr <- adjustedPR(design = subset_female) |> 
+  select(characteristic, display) |> 
+  rename(pr_female = display)
 
-# # remove the ones we need to suppress based on table 1
-# # TODO recode if this changes
-# fig1_female_aors <- fig1_female_aors %>% 
-#   filter(!var %in%
-#            c("American Indian or Alaskan Native, non-Hispanic",
-#              "Native Hawaiian or other Pacific Islander, non-Hispanic",
-#              "Another single race, non-Hispanic"))
+# MALES
+## unadjusted prevalence
+tbl3_male_prev <- bind_rows(
+    stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_male),
+    stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_male),
+    stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_male),
+    stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan status", design = subset_male),
+    stratifiedPrevalence(outcome = "walking", var = "bmi", text = "body mass index category", design = subset_male))  |> 
+  full_join(
+    bind_rows(
+      comparison_superscript(outcome = "walking", var = "age", design = subset_male),
+      comparison_superscript(outcome = "walking", var = "raceeth", design = subset_male),
+      comparison_superscript(outcome = "walking", var = "edu", design = subset_male),
+      comparison_superscript(outcome = "walking", var = "bmi", design = subset_male),
+      comparison_superscript(outcome = "walking", var = "msa", design = subset_male)),
+    by = join_by(characteristic)) |>   
+  select(characteristic, 
+         # counts, 
+         prev,
+         superscript) |> 
+  rename(#counts_male = counts,
+         prev_male = prev,
+         superscript_male = superscript)
+## adjusted PRs
+tbl3_male_pr <- adjustedPR(design = subset_male) |> 
+  select(characteristic, display) |> 
+  rename(pr_male = display)
 
-# add index
-fig1_female_aors <- tibble::rowid_to_column(fig1_female_aors, "index_asc")
+# join %s and aPRs
+tbl3 <- full_join(tbl3_total,
+                  tbl3_female_prev,
+                  by = join_by("characteristic")) |>
+  full_join(tbl3_female_pr,
+            by = join_by("characteristic")) |>
+  full_join(tbl3_male_prev,
+            by = join_by("characteristic")) |> 
+  full_join(tbl3_male_pr,
+            by = join_by("characteristic"))
 
-# df for referent groups
-fig1_female_ref <- data.frame(index_asc = c(0.5, 8.5, 12.5, 15.5, 19.5),
-                           var = c("18–29",
-                                   "Hispanic",
-                                   "Did not graduate high school",
-                                   "Underweight",
-                                   "Nonmetropolitan counties"),
-                               OddsRatio = 1,
-                               X2.5.. = 0,
-                               X97.5.. = 0,
-                               female_display = "Referent",
-                               statsig = FALSE,
-                               referent = TRUE,
-                               stringsAsFactors = FALSE)
-
-# combine with aORs, sort by index, create new index
-# fig1_female_aors <- fig1_female_aors %>% select(index, var, OddsRatio, X2.5.., X97.5.., female_display, statsig)# df for white space
-fig1_female_blank <- data.frame(index_asc = c(0.45, 5.45, 12.45, 15.45, 18.45), 
-                             var = c("Age group (years)", 
-                                     "Race and ethnicity", 
-                                     "Education level", 
-                                     "Metropolitan status",
-                                     "Body Mass Index category"))
-fig1_female <- bind_rows(fig1_female_aors, fig1_female_ref, fig1_female_blank) %>% arrange(desc(index_asc))
-fig1_female <- fig1_female %>% 
-  mutate(index = rank(-index_asc)) %>%  # descending for figure
-  select(-index_asc)
-
-# display
-fig1_female %>% filter(!is.na(var)) %>% arrange(desc(index)) %>% select(var, female_display, statsig) %>% 
-  flextable() %>% 
-  set_caption("Text for manuscript for walking aORs among females") %>% 
-  set_header_labels(var = "Characteristic",
-                    female_display = "aOR for walking among females",
-                    statsig = "p-value<0.05?") %>%
-  bold(i = ~ statsig == TRUE, bold = TRUE) %>%
-  autofit(add_w=0) %>% 
+# make flextable
+tbl3_ft <- tbl3 %>% 
+  flextable() %>%
+  compose(part = "body",
+    i = ~ superscript_total != "",   # only rows needing superscript
+    j = 'prev_total',
+    value = as_paragraph(
+      as_chunk(prev_total),
+      as_sup(superscript_total))) %>% 
+  compose(part = "body",
+    i = ~ superscript_female != "",   # only rows needing superscript
+    j = 'prev_female',
+    value = as_paragraph(
+      as_chunk(prev_female),
+      as_sup(superscript_female))) %>% 
+  compose(part = "body",
+    i = ~ superscript_male != "",   # only rows needing superscript
+    j = 'prev_male',
+    value = as_paragraph(
+      as_chunk(prev_male),
+      as_sup(superscript_male))) %>%
+  delete_columns(c("superscript_total", "superscript_female", "superscript_male")) %>%
+  set_header_labels(
+    characteristic = "Characteristic",
+    prev_total = "Unadjusted % (95% CI)",
+    prev_female = "Unadjusted % (95% CI)",
+    pr_female = "Adjusted prevalence ratio (95% CI)",
+    prev_male = "Unadjusted % (95% CI)",
+    pr_male = "Adjusted prevalence ratio (95% CI)") %>%
+  add_header_row(values = c("N used for analysis",
+                            tbl3_n$prev_total,
+                            tbl3_n$prev_female,
+                            tbl3_n$pr_female,
+                            tbl3_n$prev_male,
+                            tbl3_n$pr_male
+                            ),
+                 colwidths = c(1, 1, 1, 1, 1, 1)) |> add_header_row(values = c("", 
+                            "Total",
+                            "Females",
+                            "Males"), 
+                 colwidths = c(1, 1, 2, 2)) %>%
+  add_header_row(values = paste0("Table 3. Weighted unadjusted prevalence and adjusted prevalence ratios of past-month, non-occupational walking among adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
+                 colwidths = tbl3 %>% ncol() - 3) %>%
+  italic(i = c(which(tbl3$prev_female == "")), # italics for readability
+         j = 1) %>% 
+  padding(i = c(which(tbl3$prev_female != "")), # indent for readability
+          j = 1,
+          padding.left = 20) %>%
+  padding(padding.top = 0, padding.bottom = 0) %>% 
+  flextable::footnote(i = 1,
+                      j = 1,
+                      part = "header",
+                      value = as_paragraph(c("If participants reported any past-month, non-occupational physical activity, they then listed the types of the two activities they spent the most time doing in the past month. Walking was the most frequently reported of the two physical activities they spent the most time in the past month doing.")), 
+                      ref_symbols = c("a")) %>%
+  flextable::footnote(i = 4,
+                      j = c(2, 3, 5),
+                      part = "header",
+                      value = as_paragraph(c("We excluded participants missing data on a characteristic from analysis of unadjusted prevalence for that characteristic")), 
+                      ref_symbols = c("b")) %>%
+  flextable::footnote(i = 4,
+                      j = c(4, 6),
+                      part = "header",
+                      value = as_paragraph(c("We created a logistic regression model for each sex and adjusted for age group, race and ethnicity, education level, metropolitan status, and body mass index category. We excluded participants missing data for any of those characteristics, sex, or walking from analysis of adjusted prevalence ratios.")), 
+                      ref_symbols = c("c")) %>%
+    add_footer_lines(
+      value = as_paragraph(
+        as_sup("d-p"),
+        "Within a characteristic for each column, subgroup pairs with the same superscript letters are significantly different (p <0.05, Bonferroni-corrected pairwise t-tests).")) %>% 
+  autofit(add_w=0) %>%
+  flextable::fontsize(size = 10, part="all") %>%
+  font(part="all", fontname = "Arial") %>% 
+  set_table_properties(layout = "autofit") %>% 
   theme_vanilla()
 
-fig1_female_plot <- ggplot(fig1_female, aes(x = OddsRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig.
+tbl3_ft
+```
+
+### Plot
+
+```{r}
+# FEMALES
+pr_female <- adjustedPR(design = subset_female)
+
+fig1_female_plot <- ggplot(pr_female, aes(x = OddsRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig.
   geom_vline(aes(xintercept = 1), linewidth = .25, linetype = "dashed") + # line for null
   geom_errorbar(aes(xmax = X97.5.., xmin = X2.5..), linewidth = 1, height = .5) + # error bars
   geom_point(stroke= 3.5) + # size of dot
@@ -1560,7 +1592,7 @@ fig1_female_plot <- ggplot(fig1_female, aes(x = OddsRatio, y = index, color = st
   theme(panel.grid.minor = element_blank(), # background lines 
         panel.grid.major.y = element_blank(),
         axis.ticks.y = element_blank()) +
-  scale_y_continuous(breaks = fig1_female$index, labels = fig1_female$var) + # y-axis
+  scale_y_continuous(breaks = pr_female$index, labels = pr_female$characteristic) + # y-axis
   scale_x_continuous(breaks = c(.5, 1, 2, 2.5), 
                      labels = c(.5, 1, 2, 2.5), 
                      limits = c(.5, 2.5)) + # x-axis
@@ -1571,90 +1603,10 @@ fig1_female_plot <- ggplot(fig1_female, aes(x = OddsRatio, y = index, color = st
   theme(legend.position="none") + # no legend
   scale_color_manual(values = c("gray65","black")) # color of dots
 
-fig1_female_plot
+# MALES
+pr_male <- adjustedPR(design = subset_male)
 
-rm(fig1_female_aors, fig1_female_ref, fig1_female_blank)
-
-```
-
-## Males
-```{r}
-
-model_male <- (svyglm(walking ~ age + raceeth_hispanic + edu + bmi + msa_nonmetro,
-                        family = quasipoisson(log),
-                        design = subset_male,
-                        na.action = na.omit))
-
-# jtools::summ(model_male, confint = T)
-# summary(model, correlation = TRUE) 
-
-# get df of aORs and CIs
-fig1_male_aors <- exp(cbind(OddsRatio = coef(model_male), # exponentiates coef to get OR
-                           confint(model_male))) %>% # get CIs
-  data.frame() %>% # make into dataframe
-  mutate(statsig = case_when(X97.5.. <1 & X2.5.. <1 ~ TRUE, # label for below null
-                             X97.5.. >1 & X2.5.. >1 ~ TRUE, # above null
-                             TRUE ~ FALSE), 
-         referent = FALSE, # label for figure
-         male_display = paste0( # text in manuscript of OR & CI
-           formatC(OddsRatio, digits = 2, format = "f"),
-           " [",
-           formatC(X2.5.., digits = 2, format = "f"),
-           "–",
-           formatC(X97.5.., digits = 2, format = "f"),
-           "]")) 
-# clean: add columns for variable name
-fig1_male_aors$var <- rownames(fig1_male_aors)
-fig1_male_aors$var <- sub("sex|raceeth_hispanic|edu|age|msa_nonmetro|bmi", "", fig1_male_aors$var) # remove category name
-fig1_male_aors <- fig1_male_aors %>% filter(var != "(Intercept)") # not intercept
-
-# # remove the ones we need to suppress based on table 1
-# # TODO recode if this changes
-# fig1_male_aors <- fig1_male_aors %>% 
-#   filter(!var %in%
-#            c("American Indian or Alaskan Native, non-Hispanic",
-#              "Native Hawaiian or other Pacific Islander, non-Hispanic",
-#              "Another single race, non-Hispanic"))
-
-# add index
-fig1_male_aors <- tibble::rowid_to_column(fig1_male_aors, "index_asc")
-
-# df for referent groups
-fig1_male_ref <- data.frame(index_asc = c(0.5, 8.5, 12.5, 15.5, 19.5),
-                           var = c("18–29",
-                                   "Hispanic",
-                                   "Did not graduate high school",
-                                   "Underweight",
-                                   "Nonmetropolitan counties"),
-                               OddsRatio = 1,
-                               X2.5.. = 0,
-                               X97.5.. = 0,
-                               male_display = "Referent",
-                               statsig = FALSE,
-                               referent = TRUE,
-                               stringsAsFactors = FALSE)
-
-# combine with aORs, sort by index, create new index
-# fig1_male_aors <- fig1_male_aors %>% select(index, var, OddsRatio, X2.5.., X97.5.., male_display, statsig)# df for white space
-fig1_male_blank <- data.frame(index_asc = c(5.45, 12.45, 15.45, 18.45), 
-                             var = "")
-fig1_male <- bind_rows(fig1_male_aors, fig1_male_ref, fig1_male_blank) %>% arrange(desc(index_asc))
-fig1_male <- fig1_male %>% 
-  mutate(index = rank(-index_asc)) %>%  # descending for figure
-  select(-index_asc)
-
-# display
-fig1_male %>% filter(!is.na(var)) %>% arrange(desc(index)) %>% select(var, male_display, statsig) %>% 
-  flextable() %>% 
-  set_caption("Text for manuscript for walking aORs among males") %>% 
-  set_header_labels(var = "Characteristic",
-                    male_display = "aOR for walking among males",
-                    statsig = "p-value<0.05?") %>%
-  bold(i = ~ statsig == TRUE, bold = TRUE) %>%
-  autofit(add_w=0) %>% 
-  theme_vanilla()
-
-fig1_male_plot <- ggplot(fig1_male, aes(x = OddsRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig.
+fig1_male_plot <- ggplot(pr_male, aes(x = OddsRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig.
   geom_vline(aes(xintercept = 1), linewidth = .25, linetype = "dashed") + # line for null
   geom_errorbar(aes(xmax = X97.5.., xmin = X2.5..), linewidth = 1, height = .5) + # error bars
   geom_point(stroke= 3.5) + # size of dot
@@ -1662,7 +1614,7 @@ fig1_male_plot <- ggplot(fig1_male, aes(x = OddsRatio, y = index, color = statsi
   theme(panel.grid.minor = element_blank(), # background lines 
         panel.grid.major.y = element_blank(),
         axis.ticks.y = element_blank()) +
-  scale_y_continuous(breaks = fig1_male$index, labels = fig1_male$var) + # y-axis
+  scale_y_continuous(breaks = pr_male$index, labels = pr_male$characteristic) + # y-axis
   scale_x_continuous(breaks = c(.5, 1, 2, 2.5), 
                      labels = c(.5, 1, 2, 2.5), 
                      limits = c(.5, 2.5)) + # x-axis
@@ -1673,18 +1625,226 @@ fig1_male_plot <- ggplot(fig1_male, aes(x = OddsRatio, y = index, color = statsi
   theme(legend.position="none") + # no legend
   scale_color_manual(values = c("gray65","black")) # color of dots
 
-fig1_male_plot
-
-rm(fig1_male_aors, fig1_male_ref, fig1_male_blank)
-
-```
-
-## Figure
-
-```{r}
 fig1_female_plot + fig1_male_plot
+
 ```
 
+<!-- ## Entire sample -->
+<!-- ```{r} -->
+<!-- # mutivariable logistic regression -->
+<!-- model_total <- (svyglm(walking ~ sex + age + raceeth_hispanic + edu + bmi + msa, -->
+<!--                        family = quasipoisson(log), -->
+<!--                        design = subset, -->
+<!--                        na.action = na.omit)) -->
+<!-- ``` -->
+
+<!-- ## Females -->
+<!-- ```{r} -->
+
+<!-- model_female <- (svyglm(walking ~ age + raceeth_hispanic + edu + bmi + msa_nonmetro, -->
+<!--                         family = quasipoisson(log), -->
+<!--                         design = subset_female, -->
+<!--                         na.action = na.omit)) -->
+
+<!-- # jtools::summ(model_female, confint = T) -->
+<!-- # summary(model, correlation = TRUE)  -->
+
+<!-- # get df of aORs and CIs -->
+<!-- fig1_female_aors <- exp(cbind(OddsRatio = coef(model_female), # exponentiates coef to get OR -->
+<!--                            confint(model_female))) %>% # get CIs -->
+<!--   data.frame() %>% # make into dataframe -->
+<!--   mutate(statsig = case_when(X97.5.. <1 & X2.5.. <1 ~ TRUE, # label for below null -->
+<!--                              X97.5.. >1 & X2.5.. >1 ~ TRUE, # above null -->
+<!--                              TRUE ~ FALSE),  -->
+<!--          referent = FALSE, # label for figure -->
+<!--          female_display = paste0( # text in manuscript of OR & CI -->
+<!--            formatC(OddsRatio, digits = 2, format = "f"), -->
+<!--            " [", -->
+<!--            formatC(X2.5.., digits = 2, format = "f"), -->
+<!--            "–", -->
+<!--            formatC(X97.5.., digits = 2, format = "f"), -->
+<!--            "]"))  -->
+<!-- # clean: add columns for variable name -->
+<!-- fig1_female_aors$var <- rownames(fig1_female_aors) -->
+<!-- fig1_female_aors$var <- sub("sex|raceeth_hispanic|edu|age|msa_nonmetro|bmi", "", fig1_female_aors$var) # remove category name -->
+<!-- fig1_female_aors <- fig1_female_aors %>% filter(var != "(Intercept)") # not intercept -->
+
+<!-- # # remove the ones we need to suppress based on table 1 -->
+<!-- # # TODO recode if this changes -->
+<!-- # fig1_female_aors <- fig1_female_aors %>%  -->
+<!-- #   filter(!var %in% -->
+<!-- #            c("American Indian or Alaskan Native, non-Hispanic", -->
+<!-- #              "Native Hawaiian or other Pacific Islander, non-Hispanic", -->
+<!-- #              "Another single race, non-Hispanic")) -->
+
+<!-- # add index -->
+<!-- fig1_female_aors <- tibble::rowid_to_column(fig1_female_aors, "index_asc") -->
+
+<!-- # df for referent groups -->
+<!-- fig1_female_ref <- data.frame(index_asc = c(0.5, 8.5, 12.5, 15.5, 19.5), -->
+<!--                            var = c("18–29", -->
+<!--                                    "Hispanic", -->
+<!--                                    "Did not graduate high school", -->
+<!--                                    "Underweight", -->
+<!--                                    "Nonmetropolitan counties"), -->
+<!--                                OddsRatio = 1, -->
+<!--                                X2.5.. = 0, -->
+<!--                                X97.5.. = 0, -->
+<!--                                female_display = "Referent", -->
+<!--                                statsig = FALSE, -->
+<!--                                referent = TRUE, -->
+<!--                                stringsAsFactors = FALSE) -->
+
+<!-- # combine with aORs, sort by index, create new index -->
+<!-- # fig1_female_aors <- fig1_female_aors %>% select(index, var, OddsRatio, X2.5.., X97.5.., female_display, statsig)# df for white space -->
+<!-- fig1_female_blank <- data.frame(index_asc = c(0.45, 5.45, 12.45, 15.45, 18.45),  -->
+<!--                              var = c("Age group (years)",  -->
+<!--                                      "Race and ethnicity",  -->
+<!--                                      "Education level",  -->
+<!--                                      "body mass index category", -->
+<!--                                      "Metropolitan status")) -->
+<!-- fig1_female <- bind_rows(fig1_female_aors, fig1_female_ref, fig1_female_blank) %>% arrange(desc(index_asc)) -->
+<!-- fig1_female <- fig1_female %>%  -->
+<!--   mutate(index = rank(-index_asc)) %>%  # descending for figure -->
+<!--   select(-index_asc) -->
+
+<!-- # display -->
+<!-- fig1_female %>% filter(!is.na(var)) %>% arrange(desc(index)) %>% select(var, female_display, statsig) %>%  -->
+<!--   flextable() %>%  -->
+<!--   set_caption("Text for manuscript for walking aORs among females") %>%  -->
+<!--   set_header_labels(var = "Characteristic", -->
+<!--                     female_display = "aOR for walking among females", -->
+<!--                     statsig = "p-value<0.05?") %>% -->
+<!--   bold(i = ~ statsig == TRUE, bold = TRUE) %>% -->
+<!--   autofit(add_w=0) %>%  -->
+<!--   theme_vanilla() -->
+
+<!-- fig1_female_plot <- ggplot(fig1_female, aes(x = OddsRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig. -->
+<!--   geom_vline(aes(xintercept = 1), linewidth = .25, linetype = "dashed") + # line for null -->
+<!--   geom_errorbar(aes(xmax = X97.5.., xmin = X2.5..), linewidth = 1, height = .5) + # error bars -->
+<!--   geom_point(stroke= 3.5) + # size of dot -->
+<!--   theme_bw() + -->
+<!--   theme(panel.grid.minor = element_blank(), # background lines  -->
+<!--         panel.grid.major.y = element_blank(), -->
+<!--         axis.ticks.y = element_blank()) + -->
+<!--   scale_y_continuous(breaks = fig1_female$index, labels = fig1_female$characteristic) + # y-axis -->
+<!--   scale_x_continuous(breaks = c(.5, 1, 2, 2.5),  -->
+<!--                      labels = c(.5, 1, 2, 2.5),  -->
+<!--                      limits = c(.5, 2.5)) + # x-axis -->
+<!--   coord_transform(x = "log10") + # x-axis log scale -->
+<!--   ylab("") + -->
+<!--   xlab("aPORs (Log Scale)") + -->
+<!--   ggtitle(str_wrap("Walking among females", width=37)) + -->
+<!--   theme(legend.position="none") + # no legend -->
+<!--   scale_color_manual(values = c("gray65","black")) # color of dots -->
+
+<!-- fig1_female_plot -->
+
+<!-- rm(fig1_female_aors, fig1_female_ref, fig1_female_blank) -->
+
+<!-- ``` -->
+
+<!-- ## Males -->
+<!-- ```{r} -->
+
+<!-- model_male <- (svyglm(walking ~ age + raceeth_hispanic + edu + bmi + msa_nonmetro, -->
+<!--                         family = quasipoisson(log), -->
+<!--                         design = subset_male, -->
+<!--                         na.action = na.omit)) -->
+
+<!-- # jtools::summ(model_male, confint = T) -->
+<!-- # summary(model, correlation = TRUE)  -->
+
+<!-- # get df of aORs and CIs -->
+<!-- fig1_male_aors <- exp(cbind(OddsRatio = coef(model_male), # exponentiates coef to get OR -->
+<!--                            confint(model_male))) %>% # get CIs -->
+<!--   data.frame() %>% # make into dataframe -->
+<!--   mutate(statsig = case_when(X97.5.. <1 & X2.5.. <1 ~ TRUE, # label for below null -->
+<!--                              X97.5.. >1 & X2.5.. >1 ~ TRUE, # above null -->
+<!--                              TRUE ~ FALSE),  -->
+<!--          referent = FALSE, # label for figure -->
+<!--          male_display = paste0( # text in manuscript of OR & CI -->
+<!--            formatC(OddsRatio, digits = 2, format = "f"), -->
+<!--            " [", -->
+<!--            formatC(X2.5.., digits = 2, format = "f"), -->
+<!--            "–", -->
+<!--            formatC(X97.5.., digits = 2, format = "f"), -->
+<!--            "]"))  -->
+<!-- # clean: add columns for variable name -->
+<!-- fig1_male_aors$var <- rownames(fig1_male_aors) -->
+<!-- fig1_male_aors$var <- sub("sex|raceeth_hispanic|edu|age|msa_nonmetro|bmi", "", fig1_male_aors$var) # remove category name -->
+<!-- fig1_male_aors <- fig1_male_aors %>% filter(var != "(Intercept)") # not intercept -->
+
+<!-- # # remove the ones we need to suppress based on table 1 -->
+<!-- # # TODO recode if this changes -->
+<!-- # fig1_male_aors <- fig1_male_aors %>%  -->
+<!-- #   filter(!var %in% -->
+<!-- #            c("American Indian or Alaskan Native, non-Hispanic", -->
+<!-- #              "Native Hawaiian or other Pacific Islander, non-Hispanic", -->
+<!-- #              "Another single race, non-Hispanic")) -->
+
+<!-- # add index -->
+<!-- fig1_male_aors <- tibble::rowid_to_column(fig1_male_aors, "index_asc") -->
+
+<!-- # df for referent groups -->
+<!-- fig1_male_ref <- data.frame(index_asc = c(0.5, 8.5, 12.5, 15.5, 19.5), -->
+<!--                            var = c("18–29", -->
+<!--                                    "Hispanic", -->
+<!--                                    "Did not graduate high school", -->
+<!--                                    "Underweight", -->
+<!--                                    "Nonmetropolitan counties"), -->
+<!--                                OddsRatio = 1, -->
+<!--                                X2.5.. = 0, -->
+<!--                                X97.5.. = 0, -->
+<!--                                male_display = "Referent", -->
+<!--                                statsig = FALSE, -->
+<!--                                referent = TRUE, -->
+<!--                                stringsAsFactors = FALSE) -->
+
+<!-- # combine with aORs, sort by index, create new index -->
+<!-- # fig1_male_aors <- fig1_male_aors %>% select(index, var, OddsRatio, X2.5.., X97.5.., male_display, statsig)# df for white space -->
+<!-- fig1_male_blank <- data.frame(index_asc = c(5.45, 12.45, 15.45, 18.45),  -->
+<!--                              var = "") -->
+<!-- fig1_male <- bind_rows(fig1_male_aors, fig1_male_ref, fig1_male_blank) %>% arrange(desc(index_asc)) -->
+<!-- fig1_male <- fig1_male %>%  -->
+<!--   mutate(index = rank(-index_asc)) %>%  # descending for figure -->
+<!--   select(-index_asc) -->
+
+<!-- # display -->
+<!-- fig1_male %>% filter(!is.na(var)) %>% arrange(desc(index)) %>% select(var, male_display, statsig) %>%  -->
+<!--   flextable() %>%  -->
+<!--   set_caption("Text for manuscript for walking aORs among males") %>%  -->
+<!--   set_header_labels(var = "Characteristic", -->
+<!--                     male_display = "aOR for walking among males", -->
+<!--                     statsig = "p-value<0.05?") %>% -->
+<!--   bold(i = ~ statsig == TRUE, bold = TRUE) %>% -->
+<!--   autofit(add_w=0) %>%  -->
+<!--   theme_vanilla() -->
+
+<!-- fig1_male_plot <- ggplot(fig1_male, aes(x = OddsRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig. -->
+<!--   geom_vline(aes(xintercept = 1), linewidth = .25, linetype = "dashed") + # line for null -->
+<!--   geom_errorbar(aes(xmax = X97.5.., xmin = X2.5..), linewidth = 1, height = .5) + # error bars -->
+<!--   geom_point(stroke= 3.5) + # size of dot -->
+<!--   theme_bw() + -->
+<!--   theme(panel.grid.minor = element_blank(), # background lines  -->
+<!--         panel.grid.major.y = element_blank(), -->
+<!--         axis.ticks.y = element_blank()) + -->
+<!--   scale_y_continuous(breaks = fig1_male$index, labels = fig1_male$var) + # y-axis -->
+<!--   scale_x_continuous(breaks = c(.5, 1, 2, 2.5),  -->
+<!--                      labels = c(.5, 1, 2, 2.5),  -->
+<!--                      limits = c(.5, 2.5)) + # x-axis -->
+<!--   coord_transform(x = "log10") + # x-axis log scale -->
+<!--   ylab("") + -->
+<!--   xlab("aPORs (Log Scale)") + -->
+<!--   ggtitle(str_wrap("Walking among males", width=37)) + -->
+<!--   theme(legend.position="none") + # no legend -->
+<!--   scale_color_manual(values = c("gray65","black")) # color of dots -->
+
+<!-- fig1_male_plot -->
+
+<!-- rm(fig1_male_aors, fig1_male_ref, fig1_male_blank) -->
+
+<!-- ``` -->
 
 # Save {.hidden .unlisted .unnumbered}
 
@@ -1694,10 +1854,12 @@ fig1_female_plot + fig1_male_plot
 wb <- openxlsx2::wb_workbook()
 wb$add_worksheet("Table 1")
 wb$add_worksheet("Table 2")
+wb$add_worksheet("Table 3")
 
 # add flextables to workbook
 wb <- flexlsx::wb_add_flextable(wb, "Table 1", tbl1_ft)
 wb <- flexlsx::wb_add_flextable(wb, "Table 2", tbl2_ft)
+wb <- flexlsx::wb_add_flextable(wb, "Table 3", tbl3_ft)
 # save the workbook
 wb$save(file = here::here("Output", "Walking_Tables.xlsx"))
 
@@ -1706,6 +1868,8 @@ read_docx() %>%
   body_add_flextable(value = tbl1_ft) %>% 
   body_add_break() %>%
   body_add_flextable(value = tbl2_ft) %>%
+  body_add_break() %>%
+  body_add_flextable(value = tbl3_ft) %>%
   print(target = here::here("Output", "Walking_Tables.docx"))
 ```
 
@@ -1753,8 +1917,8 @@ read_docx() %>%
 <!--     stratifiedPrevalence(outcome = i, var = "age", text = "Age group (years)", design = subset_female), -->
 <!--     stratifiedPrevalence(outcome = i, var = "raceeth", text = "Race and ethnicity", design = subset_female), -->
 <!--     stratifiedPrevalence(outcome = i, var = "edu", text = "Education level", design = subset_female), -->
-<!--     stratifiedPrevalence(outcome = i, var = "bmi", text = "Body Mass Index category", design = subset_female), -->
-<!--     stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan Status", design = subset_female), -->
+<!--     stratifiedPrevalence(outcome = i, var = "bmi", text = "body mass index category", design = subset_female), -->
+<!--     stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan status", design = subset_female), -->
 <!--     stratifiedPrevalence(outcome = i, var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female) -->
 <!--     ) %>% -->
 <!--     select(characteristic, prev) %>% # TODO change display to prev if don't want p-values  -->
@@ -1840,8 +2004,8 @@ read_docx() %>%
 <!--     stratifiedPrevalence(outcome = i, var = "age", text = "Age group (years)", design = subset_male), -->
 <!--     stratifiedPrevalence(outcome = i, var = "raceeth", text = "Race and ethnicity", design = subset_male), -->
 <!--     stratifiedPrevalence(outcome = i, var = "edu", text = "Education level", design = subset_male), -->
-<!--     stratifiedPrevalence(outcome = i, var = "bmi", text = "Body Mass Index category", design = subset_male), -->
-<!--     stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan Status", design = subset_male), -->
+<!--     stratifiedPrevalence(outcome = i, var = "bmi", text = "body mass index category", design = subset_male), -->
+<!--     stratifiedPrevalence(outcome = i, var = "msa", text = "Metropolitan status", design = subset_male), -->
 <!--     stratifiedPrevalence(outcome = i, var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male) -->
 <!--     ) %>% -->
 <!--     select(characteristic, display) %>% # TODO add pvalue column by changing prev to display? -->
