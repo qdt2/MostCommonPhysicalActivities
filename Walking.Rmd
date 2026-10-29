@@ -863,19 +863,9 @@ df %>% tabyl(exclude) %>%
     percent = "%")
 ```
 
-## Complete cases
-```{r}
-df2 <- df |> filter(complete.cases(sex, age, raceeth, edu, bmi, msa, walking) & include == TRUE)
+## Differences between groups {.hidden .unlisted .unnumbered}
 
-df2 |> tabyl(sex)
-
-df2 |> tabyl(msa, sex) |> clipr::write_clip()
-
-```
-
-
-## Differences between included and excluded {.hidden .unlisted .unnumbered}
-
+### Between included and excluded
 ```{r, eval=FALSE, include=FALSE}
 chisq.test(df$sex, df$include) # pvalue <0.05
 chisq.test(df$age, df$include) # pvalue <0.05
@@ -909,6 +899,53 @@ t.test(data = df5, include ~ msa)
 
 ```
 
+### Between complete cases and those missing data among analytic sample
+
+```{r, eval=FALSE, include=FALSE}
+
+# filter to analytic sample
+df2 <- df |> 
+  filter(include == TRUE) |> 
+  mutate(complete_case = case_when(
+    complete.cases(sex, age, raceeth, edu, bmi, msa, walking) ~ TRUE,
+    .default = FALSE
+  ))
+
+df2 |> tabyl(complete_case)
+
+chisq.test(df2$sex, df2$complete_case) # pvalue <0.05
+chisq.test(df2$age, df2$complete_case) # pvalue <0.05
+chisq.test(df2$raceeth, df2$complete_case) # pvalue <0.05
+chisq.test(df2$edu, df2$complete_case) # pvalue <0.05
+chisq.test(df2$bmi, df2$complete_case) # pvalue <0.05
+chisq.test(df2$msa, df2$complete_case) # pvalue <0.05
+
+# unweighted sociodemographic differences to eyeball differences, would need pairwise comparisons to specifically call out
+table1::table1(~ sex + age + edu + bmi + msa  | complete_case,
+               data = df2,
+               topclass = "Rtable1-zebra")
+df2 |> filter(complete_case == FALSE) |> tabyl(msa)
+
+# t-testing# t-testingedu
+# TODO check this
+
+df3 <- df2 %>% filter(age %in% c("65–74", "30–44"))
+df3 %>% tabyl(age, complete_case)
+t.test(data = df3, complete_case ~ age)
+t.test(data = df3, as.numeric(age) ~ complete_case)
+chisq.test(df3$complete_case, df3$age)
+
+df3 <- df2 %>% filter(edu %in% c("Did not graduate high school", "Graduated from college or technical school"))
+t.test(data = df3, complete_case ~ edu)
+
+df3 <- df2 %>% filter(bmi %in% c("Normal weight", "Obesity"))
+t.test(data = df3, complete_case ~ bmi)
+
+df3 <- df2 %>% filter(msa %in% c("Metropolitan counties", "Nonmetropolitan counties"))
+t.test(data = df3, complete_case ~ msa)
+
+```
+
 ## Table 1. Sample characteristics
 
 ```{r}
@@ -939,86 +976,32 @@ overallRow <- overallPrevalence(var = "sex", text = "Overall weighted % for sex"
 
 # total for entire sample
 tbl1_total <- bind_rows(
-  bind_rows(
-    overallPrevalence(var = "age", text = "Age group (years)", design = subset),
-    overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset),
-    overallPrevalence(var = "edu", text = "Education level", design = subset),
-    overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset),
-    overallPrevalence(var = "bmi", text = "Body Mass Index category", design = subset),
-    # overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset),
-    data.frame(characteristic = "Physical Activity")) %>% 
-    select(characteristic, counts, display),
-  bind_rows(
-    overallPrevalence(var = "pa_no", text = "No past-month physical activity", design = subset),
-    overallPrevalence(var = "walking", text = "Walking", design = subset),
-    overallPrevalence(var = "other", text = "Other", design = subset),
-    overallPrevalence(var = "running", text = "Running or jogging", design = subset),
-    overallPrevalence(var = "weightlifting", text = "Weight lifting", design = subset),
-    overallPrevalence(var = "household", text = "Household activities", design = subset),
-    overallPrevalence(var = "yoga", text = "Yoga, Pilates, or Tai Chi", design = subset),
-    overallPrevalence(var = "gardening", text = "Gardening or yard work", design = subset),
-    overallPrevalence(var = "bicycling", text = "Bicycling or bicycling machine exercise", design = subset),
-    overallPrevalence(var = "aerobics", text = "Aerobics video or class", design = subset),
-    overallPrevalence(var = "calisthenics", text = "Calisthenics", design = subset),
-    overallPrevalence(var = "elliptical", text = "Elliptical/EFX machine", design = subset)) %>%
-    arrange(desc(mean)) %>%
-    select(characteristic, counts, display))
+  overallPrevalence(var = "age", text = "Age group (years)", design = subset),
+  overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset),
+  overallPrevalence(var = "edu", text = "Education level", design = subset),
+  overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset),
+  overallPrevalence(var = "bmi", text = "Body Mass Index category", design = subset)) %>% 
+    select(characteristic, counts, display)
 
 # females
 tbl1_female <- bind_rows(
-  bind_rows(
-    overallPrevalence(var = "age", text = "Age group (years)", design = subset_female),
-    overallPrevalence(var = "raceeth", text = "Race/ethnicity", design = subset_female),
-    overallPrevalence(var = "edu", text = "Education level", design = subset_female),
-    overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_female),
-    overallPrevalence(var = "bmi", text = "Body Mass Index", design = subset_female),
-    # overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_female),
-    data.frame(characteristic = "Physical Activity")) %>% 
-    select(characteristic, counts, display),
-  bind_rows(
-    overallPrevalence(var = "pa_no", text = "No past-month physical activity", design = subset_female),
-    overallPrevalence(var = "walking", text = "Walking", design = subset_female),
-    overallPrevalence(var = "other", text = "Other", design = subset_female),
-    overallPrevalence(var = "running", text = "Running or jogging", design = subset_female),
-    overallPrevalence(var = "weightlifting", text = "Weight lifting", design = subset_female),
-    overallPrevalence(var = "household", text = "Household activities", design = subset_female),
-    overallPrevalence(var = "yoga", text = "Yoga, Pilates, or Tai Chi", design = subset_female),
-    overallPrevalence(var = "gardening", text = "Gardening or yard work", design = subset_female),
-    overallPrevalence(var = "bicycling", text = "Bicycling or bicycling machine exercise", design = subset_female),
-    overallPrevalence(var = "aerobics", text = "Aerobics video or class", design = subset_female),
-    overallPrevalence(var = "calisthenics", text = "Calisthenics", design = subset_female),
-    overallPrevalence(var = "elliptical", text = "Elliptical/EFX machine", design = subset_female)) %>%
-    arrange(desc(mean)) %>%
-    select(characteristic, counts, display)) %>% 
+  overallPrevalence(var = "age", text = "Age group (years)", design = subset_female),
+  overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset_female),
+  overallPrevalence(var = "edu", text = "Education level", design = subset_female),
+  overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_female),
+  overallPrevalence(var = "bmi", text = "Body Mass Index category", design = subset_female)) %>%
+  select(characteristic, counts, display) %>% 
   rename(counts_female = counts,
          display_female = display)
 
 # males
 tbl1_male <- bind_rows(
-  bind_rows(
-    overallPrevalence(var = "age", text = "Age group (years)", design = subset_male),
-    overallPrevalence(var = "raceeth", text = "Race/ethnicity", design = subset_male),
-    overallPrevalence(var = "edu", text = "Education level", design = subset_male),
-    overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_female),
-    overallPrevalence(var = "bmi", text = "Body Mass Index", design = subset_male),
-    # overallPrevalence(var = "pag_aerobic", text = "Participation in aerobic physical activity", design = subset_male),
-    data.frame(characteristic = "Physical Activity")) %>% 
-    select(characteristic, counts, display),
-  bind_rows(
-    overallPrevalence(var = "pa_no", text = "No past-month physical activity", design = subset_male),
-    overallPrevalence(var = "walking", text = "Walking", design = subset_male),
-    overallPrevalence(var = "other", text = "Other", design = subset_male),
-    overallPrevalence(var = "running", text = "Running or jogging", design = subset_male),
-    overallPrevalence(var = "weightlifting", text = "Weight lifting", design = subset_male),
-    overallPrevalence(var = "household", text = "Household activities", design = subset_male),
-    overallPrevalence(var = "yoga", text = "Yoga, Pilates, or Tai Chi", design = subset_male),
-    overallPrevalence(var = "gardening", text = "Gardening or yard work", design = subset_male),
-    overallPrevalence(var = "bicycling", text = "Bicycling or bicycling machine exercise", design = subset_male),
-    overallPrevalence(var = "aerobics", text = "Aerobics video or class", design = subset_male),
-    overallPrevalence(var = "calisthenics", text = "Calisthenics", design = subset_male),
-    overallPrevalence(var = "elliptical", text = "Elliptical/EFX machine", design = subset_male)) %>%
-    arrange(desc(mean)) %>%
-    select(characteristic, counts, display)) %>% 
+  overallPrevalence(var = "age", text = "Age group (years)", design = subset_male),
+  overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset_male),
+  overallPrevalence(var = "edu", text = "Education level", design = subset_male),
+  overallPrevalence(var = "msa", text = "Metropolitan Status", design = subset_male),
+  overallPrevalence(var = "bmi", text = "Body Mass Index category", design = subset_male)) %>%
+  select(characteristic, counts, display) %>% 
   rename(counts_male = counts,
          display_male = display)
 
@@ -1031,28 +1014,7 @@ tbl1 <- bind_rows(
      left_join(tbl1_male,
                by = "characteristic")))
 
-# # table if not stratifying
-# tbl1_ft <- tbl1_total %>% 
-#   flextable() %>% 
-#   set_header_labels(
-#     characteristic = "Characteristic",
-#     counts = paste0("Unweighted n"),
-#     display = "Weighted % (95% CI)") %>%
-#   add_header_row(values = paste0("Table 1. Sample characteristics of US adults (N = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), "), Behavioral Risk Factor Surveillance System — United States, 2023"),
-#                  colwidths = tbl1_total %>% ncol()) %>% 
-#   italic(i = c(which(is.na(tbl1_total$counts))), # italics for readability
-#          j = 1) %>% 
-#   padding(i = c(which(!is.na(tbl1_total$counts))), # indent for readability
-#           j = 1,
-#           padding.left = 20) %>%
-#   padding(padding.top = 0, padding.bottom = 0) %>% 
-#   autofit(add_w=0) %>%
-#   flextable::fontsize(size = 10, part="all") %>%
-#   font(part="all", fontname = "Arial") %>% 
-#   set_table_properties(layout = "autofit") %>% 
-#   theme_vanilla()
-
-# if stratifying by sex
+# make flextable
 tbl1_ft <- tbl1 %>% 
   flextable() %>% 
   set_header_labels(
@@ -1089,16 +1051,6 @@ tbl1_ft <- tbl1 %>%
                       part = "header",
                       value = as_paragraph(c("Participants missing data on a characteristic were excluded from analysis of that characteristic.")), 
                       ref_symbols = c("b")) %>%
-  flextable::footnote(i = which(tbl1 == "Physical Activity"),
-                      j = 1,
-                      part = "body",
-                      value = as_paragraph(c("If participants reported any past-month, non-occupational physical activity, they then listed the types of the two activities they spent the most time doing in the past month.")), 
-                      ref_symbols = c("c")) %>%
-  flextable::footnote(i = which(tbl1 == "Physical Activity"),
-                      j = 1,
-                      part = "body",
-                      value = as_paragraph(c("There were differences in prevalence between females and males for all activities (weighted t-test p-value <0.001) except Elliptical/EFX machine (weighted t-test p-value = 0.29).")), 
-                      ref_symbols = c("d")) %>%
   autofit(add_w=0) %>%
   flextable::fontsize(size = 10, part="all") %>%
   font(part="all", fontname = "Arial") %>% 
@@ -1107,6 +1059,130 @@ tbl1_ft <- tbl1 %>%
 
 # display
 tbl1_ft
+```
+
+## Table 2: No past-month PA and physical activities
+```{r}
+# total for entire sample
+tbl2_total <- bind_rows(
+  overallPrevalence(var = "pa_no", text = "No past-month physical activity", design = subset),
+  (bind_rows(
+    overallPrevalence(var = "walking", text = "Walking", design = subset),
+    overallPrevalence(var = "other", text = "Other", design = subset),
+    overallPrevalence(var = "running", text = "Running or jogging", design = subset),
+    overallPrevalence(var = "weightlifting", text = "Weight lifting", design = subset),
+    overallPrevalence(var = "household", text = "Household activities", design = subset),
+    overallPrevalence(var = "yoga", text = "Yoga, Pilates, or Tai Chi", design = subset),
+    overallPrevalence(var = "gardening", text = "Gardening or yard work", design = subset),
+    overallPrevalence(var = "bicycling", text = "Bicycling or bicycling machine exercise", design = subset),
+    overallPrevalence(var = "aerobics", text = "Aerobics video or class", design = subset),
+    overallPrevalence(var = "calisthenics", text = "Calisthenics", design = subset),
+    overallPrevalence(var = "elliptical", text = "Elliptical/EFX machine", design = subset)) %>%
+    arrange(desc(mean)))) %>%
+    select(characteristic, counts, display)
+
+# females
+tbl2_female <- bind_rows(
+  overallPrevalence(var = "pa_no", text = "No past-month physical activity", design = subset_female),
+  (bind_rows(
+    overallPrevalence(var = "walking", text = "Walking", design = subset_female),
+    overallPrevalence(var = "other", text = "Other", design = subset_female),
+    overallPrevalence(var = "running", text = "Running or jogging", design = subset_female),
+    overallPrevalence(var = "weightlifting", text = "Weight lifting", design = subset_female),
+    overallPrevalence(var = "household", text = "Household activities", design = subset_female),
+    overallPrevalence(var = "yoga", text = "Yoga, Pilates, or Tai Chi", design = subset_female),
+    overallPrevalence(var = "gardening", text = "Gardening or yard work", design = subset_female),
+    overallPrevalence(var = "bicycling", text = "Bicycling or bicycling machine exercise", design = subset_female),
+    overallPrevalence(var = "aerobics", text = "Aerobics video or class", design = subset_female),
+    overallPrevalence(var = "calisthenics", text = "Calisthenics", design = subset_female),
+    overallPrevalence(var = "elliptical", text = "Elliptical/EFX machine", design = subset_female)) %>%
+    arrange(desc(mean)))) %>%
+    select(characteristic, counts, display) %>% 
+  rename(counts_female = counts,
+         display_female = display)
+
+# males
+tbl2_male <- bind_rows(
+  overallPrevalence(var = "pa_no", text = "No past-month physical activity", design = subset_male),
+  (bind_rows(
+    overallPrevalence(var = "walking", text = "Walking", design = subset_male),
+    overallPrevalence(var = "other", text = "Other", design = subset_male),
+    overallPrevalence(var = "running", text = "Running or jogging", design = subset_male),
+    overallPrevalence(var = "weightlifting", text = "Weight lifting", design = subset_male),
+    overallPrevalence(var = "household", text = "Household activities", design = subset_male),
+    overallPrevalence(var = "yoga", text = "Yoga, Pilates, or Tai Chi", design = subset_male),
+    overallPrevalence(var = "gardening", text = "Gardening or yard work", design = subset_male),
+    overallPrevalence(var = "bicycling", text = "Bicycling or bicycling machine exercise", design = subset_male),
+    overallPrevalence(var = "aerobics", text = "Aerobics video or class", design = subset_male),
+    overallPrevalence(var = "calisthenics", text = "Calisthenics", design = subset_male),
+    overallPrevalence(var = "elliptical", text = "Elliptical/EFX machine", design = subset_male)) %>%
+    arrange(desc(mean)))) %>%
+    select(characteristic, counts, display) %>% 
+  rename(counts_male = counts,
+         display_male = display)
+
+# join
+tbl2 <- left_join(tbl2_total, 
+             tbl2_female,
+             by = "characteristic") %>%
+     left_join(tbl2_male,
+               by = "characteristic")
+
+# make flextable
+tbl2_ft <- tbl2 %>% 
+  flextable() %>% 
+  set_header_labels(
+    characteristic = "Characteristic",
+    counts = "n",
+    display = "% (95% CI)",
+    counts_female = "n",
+    display_female = "% (95% CI)",
+    counts_male = "n",
+    display_male = "% (95% CI)") %>%
+  add_header_row(values = c("", 
+                            # "Total",
+                            # "Females",
+                            # "Males"),
+                            paste0("Total (n = ", df %>% filter(include == TRUE) %>% nrow() %>% sjmisc::big_mark(), ")"),
+                            paste0("Females (n = ", df %>% filter(include == TRUE & sex == "Female") %>% nrow() %>% sjmisc::big_mark(), ")"),
+                            paste0("Males (n = ", df %>% filter(include == TRUE & sex == "Male") %>% nrow() %>% sjmisc::big_mark(), ")")),
+                 colwidths = c(1, 2, 2, 2)) %>% 
+  add_header_row(values = paste0("Table 2. Weighted prevalence of no past-month physical activity and past-month physical activities outside of work, Behavioral Risk Factor Surveillance System — United States, 2023"),
+                 colwidths = tbl2 %>% ncol()) %>% 
+  italic(i = c(which(is.na(tbl2$counts))), # italics for readability
+         j = 1) %>% 
+  # padding(i = c(which(tbl2$characteristic != "Overall" & !is.na(tbl2$counts))), # indent for readability
+  #         j = 1,
+  #         padding.left = 20) %>%
+  padding(padding.top = 0, padding.bottom = 0) %>% 
+  flextable::footnote(i = 1,
+                      j = 1,
+                      part = "header",
+                      value = as_paragraph(c("N's are unweighted. Prevalence %s and 95% CIs are weighted.")), 
+                      ref_symbols = c("a")) %>%
+  flextable::footnote(i = 1,
+                      j = 1,
+                      part = "header",
+                      value = as_paragraph(c("If participants reported any past-month, non-occupational physical activity, they then listed the types of the two activities they spent the most time doing in the past month.")), 
+                      ref_symbols = c("b")) %>%
+  flextable::footnote(i = 3,
+                      j = 1,
+                      part = "header",
+                      value = as_paragraph(c("Participants missing data on a characteristic were excluded from analysis of that characteristic.")), 
+                      ref_symbols = c("c")) %>%
+  flextable::footnote(i = which(tbl2$characteristic != "Elliptical/EFX machine"),
+                      j = 1,
+                      part = "body",
+                      value = as_paragraph(c("There were differences in prevalence between females and males  (weighted t-test p-value <0.001).")), 
+                      ref_symbols = c("d")) %>%
+  autofit(add_w=0) %>%
+  flextable::fontsize(size = 10, part="all") %>%
+  font(part="all", fontname = "Arial") %>% 
+  set_table_properties(layout = "autofit") %>% 
+  theme_vanilla()
+
+# display
+tbl2_ft
 ```
 
 ### T-testing for sex differences for physical activities and no PA {.hidden .unlisted .unnumbered}
@@ -1149,13 +1225,12 @@ svyby(formula = ~running, by = ~one, design = subset,
 
 ```
 
-
-## Table 2. Prevalence of walking
+## Table 3. Prevalence and aPRs for walking
 
 ```{r}
 
 # entire sample
-tbl2_total <- bind_rows(
+tbl3_total <- bind_rows(
   stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset),
   stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset),
   stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset),
@@ -1178,7 +1253,7 @@ tbl2_total <- bind_rows(
     superscript_total = superscript)
 
 # females only
-tbl2_female <- bind_rows(
+tbl3_female <- bind_rows(
     stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_female),
     stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_female),
     stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_female),
@@ -1201,7 +1276,7 @@ tbl2_female <- bind_rows(
          superscript_female = superscript)
 
 # males only
-tbl2_male <- bind_rows(
+tbl3_male <- bind_rows(
     stratifiedPrevalence(outcome = "walking", var = "age", text = "Age group (years)", design = subset_male),
     stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_male),
     stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_male),
@@ -1224,14 +1299,14 @@ tbl2_male <- bind_rows(
          superscript_male = superscript)
 
 # join
-tbl2 <- full_join(tbl2_total,
-                  tbl2_female,
+tbl3 <- full_join(tbl3_total,
+                  tbl3_female,
                   by = join_by("characteristic")) |>
-  full_join(tbl2_male,
+  full_join(tbl3_male,
             by = join_by("characteristic"))
 
 # make flextable
-tbl2_ft <- tbl2 %>% 
+tbl3_ft <- tbl3 %>% 
   flextable() %>%
   compose(part = "body",
     i = ~ superscript_total != "",   # only rows needing superscript
@@ -1263,10 +1338,10 @@ tbl2_ft <- tbl2 %>%
                             "% (95% CI)"), 
                  colwidths = c(1, 3)) %>% 
   add_header_row(values = paste0("Table 2. Weighted prevalence of walking among adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
-                 colwidths = tbl2 %>% ncol() - 3) %>%
-  italic(i = c(which(tbl2$prev_female == "")), # italics for readability
+                 colwidths = tbl3 %>% ncol() - 3) %>%
+  italic(i = c(which(tbl3$prev_female == "")), # italics for readability
          j = 1) %>% 
-  padding(i = c(which(tbl2$prev_female != "")), # indent for readability
+  padding(i = c(which(tbl3$prev_female != "")), # indent for readability
           j = 1,
           padding.left = 20) %>%
   padding(padding.top = 0, padding.bottom = 0) %>% 
@@ -1290,7 +1365,7 @@ tbl2_ft <- tbl2 %>%
   set_table_properties(layout = "autofit") %>% 
   theme_vanilla()
 
-tbl2_ft
+tbl3_ft
 ```
 
 ### Pairwise comparisons. These tables wil not be in the paper, but we will add symbols to Table 2 depicting the statistically significant differences.
@@ -1439,7 +1514,7 @@ fig1_female_aors <- fig1_female_aors %>% filter(var != "(Intercept)") # not inte
 fig1_female_aors <- tibble::rowid_to_column(fig1_female_aors, "index_asc")
 
 # df for referent groups
-fig1_female_ref <- data.frame(index_asc = c(0.5, 5.5, 12.5, 15.5, 18.5),
+fig1_female_ref <- data.frame(index_asc = c(0.5, 8.5, 12.5, 15.5, 19.5),
                            var = c("18–29",
                                    "Hispanic",
                                    "Did not graduate high school",
@@ -1455,8 +1530,12 @@ fig1_female_ref <- data.frame(index_asc = c(0.5, 5.5, 12.5, 15.5, 18.5),
 
 # combine with aORs, sort by index, create new index
 # fig1_female_aors <- fig1_female_aors %>% select(index, var, OddsRatio, X2.5.., X97.5.., female_display, statsig)# df for white space
-fig1_female_blank <- data.frame(index_asc = c(5.45, 12.45, 15.45, 18.45), 
-                             var = "")
+fig1_female_blank <- data.frame(index_asc = c(0.45, 5.45, 12.45, 15.45, 18.45), 
+                             var = c("Age group (years)", 
+                                     "Race and ethnicity", 
+                                     "Education level", 
+                                     "Metropolitan status",
+                                     "Body Mass Index category"))
 fig1_female <- bind_rows(fig1_female_aors, fig1_female_ref, fig1_female_blank) %>% arrange(desc(index_asc))
 fig1_female <- fig1_female %>% 
   mutate(index = rank(-index_asc)) %>%  # descending for figure
@@ -1541,7 +1620,7 @@ fig1_male_aors <- fig1_male_aors %>% filter(var != "(Intercept)") # not intercep
 fig1_male_aors <- tibble::rowid_to_column(fig1_male_aors, "index_asc")
 
 # df for referent groups
-fig1_male_ref <- data.frame(index_asc = c(0.5, 5.5, 12.5, 15.5, 18.5),
+fig1_male_ref <- data.frame(index_asc = c(0.5, 8.5, 12.5, 15.5, 19.5),
                            var = c("18–29",
                                    "Hispanic",
                                    "Did not graduate high school",
