@@ -838,11 +838,11 @@ adjustedPR <- function(design) {
            referent = FALSE, # label for figure
            display = paste0( # text in manuscript of OR & CI
              formatC(OddsRatio, digits = 2, format = "f"),
-             " [",
+             " (",
              formatC(X2.5.., digits = 2, format = "f"),
              "–",
              formatC(X97.5.., digits = 2, format = "f"),
-             "]"))
+             ")"))
   
   # clean: add columns for variable name
   pr_ci$characteristic <- rownames(pr_ci)
@@ -1448,7 +1448,7 @@ tbl3_ft <- tbl3 %>%
 tbl3_ft
 ```
 
-### Plot
+### Plots
 
 ```{r}
 # FEMALES
@@ -1495,7 +1495,8 @@ fig1_male_plot <- ggplot(pr_male, aes(x = OddsRatio, y = index, color = statsig,
   theme(legend.position="none") + # no legend
   scale_color_manual(values = c("gray65","black")) # color of dots
 
-fig1_female_plot + fig1_male_plot
+fig1_female_plot
+fig1_male_plot
 
 ```
 
