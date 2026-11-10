@@ -894,6 +894,39 @@ adjustedPR <- function(design) {
   
 ```
 
+#### Michael's simpler code
+
+```{r}
+# TODO incorporate this
+
+# # predicted marginals for sex (adjusted for age group and race)
+# 
+# adj_sex <- svyglm(arthritis ~ agegrp + race,
+# 
+#                   design = des, family = quasibinomial())
+# 
+# pm_sex  <- svypredmeans(adj_sex, ~sex)
+#  
+# # prevalence ratio: female (2) / male (1)
+# 
+# rr_sex <- svycontrast(pm_sex, quote(`2` / `1`))
+# 
+# rr_sex
+#  
+# for the PR Ci you would add this:
+# rr    <- as.numeric(coef(rr_sex))
+# 
+# se    <- as.numeric(SE(rr_sex))
+# 
+# tcrit <- qt(0.975, degf(des))
+#  
+# c(rr    = rr,
+# 
+#   lower = exp(log(rr) - tcrit * se / rr),
+# 
+#   upper = exp(log(rr) + tcrit * se / rr)) 
+#  
+```
 
 # Results
 
@@ -1499,6 +1532,35 @@ fig1_female_plot
 fig1_male_plot
 
 ```
+
+#### Model for entire sample (not stratified by sex)
+```{r}
+model <- (svyglm(walking ~ sex + age + raceeth_hispanic + edu + bmi + msa_nonmetro,
+                        family = quasipoisson(log),
+                        design = subset,
+                        na.action = na.omit))
+  # jtools::summ(model, confint = T)
+  # summary(model, correlation = TRUE) 
+  
+  # get df of aORs and CIs
+  pr_ci <- exp(cbind(OddsRatio = coef(model), # exponentiates coef to get OR
+                     confint(model))) %>% # get CIs
+    data.frame() %>% # make into dataframe
+    mutate(statsig = case_when(X97.5.. <1 & X2.5.. <1 ~ TRUE, # label for below null
+                               X97.5.. >1 & X2.5.. >1 ~ TRUE, # above null
+                               TRUE ~ FALSE),
+           referent = FALSE, # label for figure
+           display = paste0( # text in manuscript of OR & CI
+             formatC(OddsRatio, digits = 2, format = "f"),
+             " (",
+             formatC(X2.5.., digits = 2, format = "f"),
+             "–",
+             formatC(X97.5.., digits = 2, format = "f"),
+             ")"))
+  
+  pr_ci
+```
+
 
 # Save {.hidden .unlisted .unnumbered}
 
