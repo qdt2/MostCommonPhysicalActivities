@@ -815,21 +815,26 @@ comparison_superscript <- function(var, outcome, design, start = 4) {
 
 ### Adjusted prevalence ratios
 
+#### Using coeff and confint
+
 ```{r}
+# It fits one svyglm() with all covariates and a quasi-Poisson family with a log link. Because of the log link, each exponentiated coefficient is a prevalence ratio directly, so no further calculation is needed. The CI comes from confint() on the coefficients, which is a Wald interval on the log scale that is then exponentiated.
+# 
+# The key assumption is that the PR for each exposure is constant across levels of the other covariates. Each PR is conditional, meaning it is the ratio comparing two people who are identical on all other model variables. A single model gives you PRs for every variable at once. The referent group is whatever the factor’s first level is, and your ref data frame hardcodes it for plotting. The log link can in principle predict probabilities above 1, though this rarely matters for the PR itself.
 
 # to get dataframe for ggplot or column for table with aPR and CIs
 adjustedPR <- function(design) {
   
   # create logistic regression model
   model <- (svyglm(walking ~ age + raceeth_hispanic + edu + bmi + msa_nonmetro,
-                        family = quasipoisson(log),
-                        design = design,
-                        na.action = na.omit))
+                   family = quasipoisson(log),
+                   design = design,
+                   na.action = na.omit))
   # jtools::summ(model, confint = T)
   # summary(model, correlation = TRUE) 
   
   # get df of aORs and CIs
-  pr_ci <- exp(cbind(OddsRatio = coef(model), # exponentiates coef to get OR
+  pr_ci <- exp(cbind(RiskRatio = coef(model), # exponentiates coef to get OR
                      confint(model))) %>% # get CIs
     data.frame() %>% # make into dataframe
     mutate(statsig = case_when(X97.5.. <1 & X2.5.. <1 ~ TRUE, # label for below null
@@ -837,7 +842,7 @@ adjustedPR <- function(design) {
                                TRUE ~ FALSE),
            referent = FALSE, # label for figure
            display = paste0( # text in manuscript of OR & CI
-             formatC(OddsRatio, digits = 2, format = "f"),
+             formatC(RiskRatio, digits = 2, format = "f"),
              " (",
              formatC(X2.5.., digits = 2, format = "f"),
              "–",
@@ -866,7 +871,7 @@ adjustedPR <- function(design) {
                             "Did not graduate high school",
                             "Underweight",
                             "Nonmetropolitan counties"),
-                    OddsRatio = 1,
+                    RiskRatio = 1,
                     X2.5.. = 0,
                     X97.5.. = 0,
                     display = "Referent",
@@ -879,7 +884,7 @@ adjustedPR <- function(design) {
                              characteristic = c("Age group (years)", 
                                      "Race and ethnicity", 
                                      "Education level", 
-                                     "body mass index category",
+                                     "Body mass index category",
                                      "Metropolitan status"))
 
   # combine with aORs, sort by index, create new index
@@ -894,6 +899,90 @@ adjustedPR <- function(design) {
   
 ```
 
+#### Using svypredmeans and svycontrast
+```{r}
+
+# It fits a separate quasibinomial (logistic) svyglm() for each exposure, and that model leaves out the exposure of interest. svypredmeans() (the Korn and Graubard method) then produces an adjusted prevalence for each level of the exposure. As I understand that method, it averages the model’s predicted values within each group and adds back the group’s mean residual, so the group differences are not lost by excluding the exposure from the model. I’d check the svypredmeans documentation on this point.
+# 
+# The PR is then the ratio of two predicted prevalences: svycontrast() computes the ratio and its SE by the delta method. The CI is built on the log scale using SE(log RR) = SE/RR, with a t critical value from degf(design). It also gives you an adjusted prevalence with a logit-scale CI for each group, which function 1 doesn’t provide.
+# 
+# This PR is marginal (population-averaged). It does not require the PR to be the same across covariate strata, because the ratio is computed after averaging over the covariate distribution. Using a logistic model avoids the convergence and out-of-range problems that log-binomial models can have. The referent is chosen with the ref argument, and the code relies on the factor level names matching the names in pm.
+
+adjustedPredMargRiskRatio <- function(design, var, ref){
+  # vector of all exposure variable names
+  vars <- c("age", "raceeth", "edu", "msa", "bmi")
+  
+  # levels for variable of interest
+  lvls <- design$variables[[var]] |> levels()
+  
+  # define referent group
+  ref <- lvls[ref]
+  
+  # formula for model without variable of interest
+  formula = as.formula(paste0("walking ~ ", vars[vars!=var] |> unlist() |> paste(collapse = ' + ')))
+
+  # build model without variable of interest
+  model <-  svyglm(formula = formula,
+                   design = design,
+                   family = quasibinomial())
+  #jtools::summ(model)
+  
+  # get predicted marginals and SE for variable of interest
+  pm <- svypredmeans(adjustmodel = model, groupfactor = as.formula(paste0("~", var)))
+  
+  # get risk ratios (prevalence ratios in cross-sectional studies) and SE
+  # by looping over different levels of the variable
+  rr <- map_dfr(lvls, \(lv) {
+    res <- svycontrast(pm, bquote(.(as.name(lv)) / .(as.name(ref))))
+    data.frame(characteristic = lv, rr = coef(res), rr_se = SE(res))
+    }) |> remove_rownames()
+  
+  # bind columns, calculate RR CIs
+  output <- left_join(
+    rr, # risk ratios
+    (pm |>  # predicted marginals
+       data.frame() |> 
+       rownames_to_column(var = "characteristic") |>
+       remove_rownames()),
+    by = "characteristic") |> 
+    rename(pr = mean,
+           pr_se = SE) |> 
+    mutate(
+      
+      # critical value
+      tcrit = qt(0.975, degf(design)),
+      
+      # CIs for predicted marginals (logit scale, keeps limits within 0-1)
+      pr_l = plogis(qlogis(pr) - tcrit * pr_se / (pr * (1 - pr))),
+      pr_u = plogis(qlogis(pr) + tcrit * pr_se / (pr * (1 - pr))),
+      
+      # concatenate predicted marginals and CI
+      pr_display = paste0(formatC(pr * 100, digits = 1, format = "f"),
+                            " (", 
+                            formatC(pr_l * 100, digits = 1, format = "f"),
+                            "–", 
+                            formatC(pr_u * 100, digits = 1, format = "f"), 
+                            ")"),
+      
+      # CIs for risk ratio (log scale)
+      rr_l = exp(log(rr) - tcrit * rr_se / rr),
+      rr_u = exp(log(rr) + tcrit * rr_se / rr),
+      
+      # concatenate risk ratios and CI
+      rr_display = case_when(
+        characteristic == ref ~ "Referent",
+        .default = paste0(formatC(rr, digits = 2, format = "f"),
+                          " (", 
+                          formatC(rr_l, digits = 2, format = "f"),
+                          "–", 
+                          formatC(rr_u, digits = 2, format = "f"), 
+                          ")"))) |> 
+    select(-tcrit)
+  
+  return(output)
+  
+}
+```
 
 # Results
 
@@ -1024,7 +1113,7 @@ tbl1_total <- bind_rows(
   overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset),
   overallPrevalence(var = "edu", text = "Education level", design = subset),
   overallPrevalence(var = "msa", text = "Metropolitan status", design = subset),
-  overallPrevalence(var = "bmi", text = "body mass index category", design = subset)) %>% 
+  overallPrevalence(var = "bmi", text = "Body mass index category", design = subset)) %>% 
     select(characteristic, counts, display)
 
 # females
@@ -1033,7 +1122,7 @@ tbl1_female <- bind_rows(
   overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset_female),
   overallPrevalence(var = "edu", text = "Education level", design = subset_female),
   overallPrevalence(var = "msa", text = "Metropolitan status", design = subset_female),
-  overallPrevalence(var = "bmi", text = "body mass index category", design = subset_female)) %>%
+  overallPrevalence(var = "bmi", text = "Body mass index category", design = subset_female)) %>%
   select(characteristic, counts, display) %>% 
   rename(counts_female = counts,
          display_female = display)
@@ -1044,7 +1133,7 @@ tbl1_male <- bind_rows(
   overallPrevalence(var = "raceeth", text = "Race and ethnicity", design = subset_male),
   overallPrevalence(var = "edu", text = "Education level", design = subset_male),
   overallPrevalence(var = "msa", text = "Metropolitan status", design = subset_male),
-  overallPrevalence(var = "bmi", text = "body mass index category", design = subset_male)) %>%
+  overallPrevalence(var = "bmi", text = "Body mass index category", design = subset_male)) %>%
   select(characteristic, counts, display) %>% 
   rename(counts_male = counts,
          display_male = display)
@@ -1114,7 +1203,7 @@ tbl2_total <- bind_rows(
     overallPrevalence(var = "walking", text = "Walking", design = subset),
     overallPrevalence(var = "other", text = "Other", design = subset),
     overallPrevalence(var = "running", text = "Running or jogging", design = subset),
-    overallPrevalence(var = "weightlifting", text = "Weight lifting", design = subset),
+    overallPrevalence(var = "weightlifting", text = "Weightlifting", design = subset),
     overallPrevalence(var = "household", text = "Household activities", design = subset),
     overallPrevalence(var = "yoga", text = "Yoga, Pilates, or Tai Chi", design = subset),
     overallPrevalence(var = "gardening", text = "Gardening or yard work", design = subset),
@@ -1132,7 +1221,7 @@ tbl2_female <- bind_rows(
     overallPrevalence(var = "walking", text = "Walking", design = subset_female),
     overallPrevalence(var = "other", text = "Other", design = subset_female),
     overallPrevalence(var = "running", text = "Running or jogging", design = subset_female),
-    overallPrevalence(var = "weightlifting", text = "Weight lifting", design = subset_female),
+    overallPrevalence(var = "weightlifting", text = "Weightlifting", design = subset_female),
     overallPrevalence(var = "household", text = "Household activities", design = subset_female),
     overallPrevalence(var = "yoga", text = "Yoga, Pilates, or Tai Chi", design = subset_female),
     overallPrevalence(var = "gardening", text = "Gardening or yard work", design = subset_female),
@@ -1152,7 +1241,7 @@ tbl2_male <- bind_rows(
     overallPrevalence(var = "walking", text = "Walking", design = subset_male),
     overallPrevalence(var = "other", text = "Other", design = subset_male),
     overallPrevalence(var = "running", text = "Running or jogging", design = subset_male),
-    overallPrevalence(var = "weightlifting", text = "Weight lifting", design = subset_male),
+    overallPrevalence(var = "weightlifting", text = "Weightlifting", design = subset_male),
     overallPrevalence(var = "household", text = "Household activities", design = subset_male),
     overallPrevalence(var = "yoga", text = "Yoga, Pilates, or Tai Chi", design = subset_male),
     overallPrevalence(var = "gardening", text = "Gardening or yard work", design = subset_male),
@@ -1191,7 +1280,7 @@ tbl2_ft <- tbl2 %>%
                             paste0("Females (n = ", df %>% filter(include == TRUE & sex == "Female") %>% nrow() %>% sjmisc::big_mark(), ")"),
                             paste0("Males (n = ", df %>% filter(include == TRUE & sex == "Male") %>% nrow() %>% sjmisc::big_mark(), ")")),
                  colwidths = c(1, 2, 2, 2)) %>% 
-  add_header_row(values = paste0("Table 2. Weighted prevalence of no past-month, non-occupational physical activity and past-month, non-occupational physical activities, Behavioral Risk Factor Surveillance System — United States, 2023"),
+  add_header_row(values = paste0("Table 2. Weighted prevalence of reporting no past-month, non-occupational physical activity and past-month, non-occupational physical activities, Behavioral Risk Factor Surveillance System — United States, 2023"),
                  colwidths = tbl2 %>% ncol()) %>% 
   italic(i = c(which(is.na(tbl2$counts))), # italics for readability
          j = 1) %>% 
@@ -1287,7 +1376,7 @@ tbl3_total <- bind_rows(
   stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset),
   stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset),
   stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan status", design = subset),
-  stratifiedPrevalence(outcome = "walking", var = "bmi", text = "body mass index category", design = subset))  |> 
+  stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body mass index category", design = subset))  |> 
   full_join(
     bind_rows(
       comparison_superscript(outcome = "walking", var = "age", design = subset),
@@ -1311,7 +1400,7 @@ tbl3_female_prev <- bind_rows(
     stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_female),
     stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_female),
     stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan status", design = subset_female),
-    stratifiedPrevalence(outcome = "walking", var = "bmi", text = "body mass index category", design = subset_female))  |> 
+    stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body mass index category", design = subset_female))  |> 
   full_join(
     bind_rows(
       comparison_superscript(outcome = "walking", var = "age", design = subset_female),
@@ -1327,11 +1416,21 @@ tbl3_female_prev <- bind_rows(
   rename(#counts_female = counts,
          prev_female = prev,
          superscript_female = superscript)
-## adjusted PRs
-tbl3_female_pr <- adjustedPR(design = subset_female) |> 
-  select(characteristic, display) |> 
-  rename(pr_female = display)
 
+## adjusted PRs
+# tbl3_female_pr <- adjustedPR(design = subset_female) |> 
+#   select(characteristic, display) |> 
+#   rename(pr_female = display)
+
+tbl3_female_pr <- bind_rows(
+  adjustedPredMargRiskRatio(design = subset_female, var = "age", ref = 1),
+  adjustedPredMargRiskRatio(design = subset_female, var = "raceeth", ref = 4),
+  adjustedPredMargRiskRatio(design = subset_female, var = "edu", ref = 1),
+  adjustedPredMargRiskRatio(design = subset_female, var = "msa", ref = 2),
+  adjustedPredMargRiskRatio(design = subset_female, var = "bmi", ref = 1)) |> 
+  select(characteristic, rr_display) |> 
+  rename(pr_female = rr_display)
+  
 # MALES
 ## unadjusted prevalence
 tbl3_male_prev <- bind_rows(
@@ -1339,7 +1438,7 @@ tbl3_male_prev <- bind_rows(
     stratifiedPrevalence(outcome = "walking", var = "raceeth", text = "Race and ethnicity", design = subset_male),
     stratifiedPrevalence(outcome = "walking", var = "edu", text = "Education level", design = subset_male),
     stratifiedPrevalence(outcome = "walking", var = "msa", text = "Metropolitan status", design = subset_male),
-    stratifiedPrevalence(outcome = "walking", var = "bmi", text = "body mass index category", design = subset_male))  |> 
+    stratifiedPrevalence(outcome = "walking", var = "bmi", text = "Body mass index category", design = subset_male))  |> 
   full_join(
     bind_rows(
       comparison_superscript(outcome = "walking", var = "age", design = subset_male),
@@ -1355,10 +1454,20 @@ tbl3_male_prev <- bind_rows(
   rename(#counts_male = counts,
          prev_male = prev,
          superscript_male = superscript)
+
 ## adjusted PRs
-tbl3_male_pr <- adjustedPR(design = subset_male) |> 
-  select(characteristic, display) |> 
-  rename(pr_male = display)
+# tbl3_male_pr <- adjustedPR(design = subset_male) |> 
+#   select(characteristic, display) |> 
+#   rename(pr_male = display)
+tbl3_male_pr <- bind_rows(
+  adjustedPredMargRiskRatio(design = subset_male, var = "age", ref = 1),
+  adjustedPredMargRiskRatio(design = subset_male, var = "raceeth", ref = 4),
+  adjustedPredMargRiskRatio(design = subset_male, var = "edu", ref = 1),
+  adjustedPredMargRiskRatio(design = subset_male, var = "msa", ref = 2),
+  adjustedPredMargRiskRatio(design = subset_male, var = "bmi", ref = 1)) |> 
+  select(characteristic, rr_display) |> 
+  rename(pr_male = rr_display)
+  
 
 # join %s and aPRs
 tbl3 <- full_join(tbl3_total,
@@ -1412,7 +1521,7 @@ tbl3_ft <- tbl3 %>%
                             "Females",
                             "Males"), 
                  colwidths = c(1, 1, 2, 2)) %>%
-  add_header_row(values = paste0("Table 3. Weighted unadjusted prevalence and adjusted prevalence ratios of past-month, non-occupational walking among adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
+  add_header_row(values = paste0("Table 3. Weighted unadjusted prevalence and adjusted prevalence ratios of reporting past-month, non-occupational walking among adults, Behavioral Risk Factor Surveillance System — United States, 2023"),
                  colwidths = tbl3 %>% ncol() - 3) %>%
   italic(i = c(which(tbl3$prev_female == "")), # italics for readability
          j = 1) %>% 
@@ -1454,7 +1563,7 @@ tbl3_ft
 # FEMALES
 pr_female <- adjustedPR(design = subset_female)
 
-fig1_female_plot <- ggplot(pr_female, aes(x = OddsRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig.
+fig1_female_plot <- ggplot(pr_female, aes(x = RiskRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig.
   geom_vline(aes(xintercept = 1), linewidth = .25, linetype = "dashed") + # line for null
   geom_errorbar(aes(xmax = X97.5.., xmin = X2.5..), linewidth = 1, height = .5) + # error bars
   geom_point(stroke= 3.5) + # size of dot
@@ -1476,7 +1585,7 @@ fig1_female_plot <- ggplot(pr_female, aes(x = OddsRatio, y = index, color = stat
 # MALES
 pr_male <- adjustedPR(design = subset_male)
 
-fig1_male_plot <- ggplot(pr_male, aes(x = OddsRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig.
+fig1_male_plot <- ggplot(pr_male, aes(x = RiskRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig.
   geom_vline(aes(xintercept = 1), linewidth = .25, linetype = "dashed") + # line for null
   geom_errorbar(aes(xmax = X97.5.., xmin = X2.5..), linewidth = 1, height = .5) + # error bars
   geom_point(stroke= 3.5) + # size of dot
@@ -1497,6 +1606,152 @@ fig1_male_plot <- ggplot(pr_male, aes(x = OddsRatio, y = index, color = statsig,
 
 fig1_female_plot
 fig1_male_plot
+
+```
+
+### Playground: svypredmeans {.hidden .unlisted .unnumbered}
+
+```{r eval=FALSE, include=FALSE}
+
+# # using function
+# adjustedPR(design = subset_female)
+
+# MSA
+## build model
+adj_msa <-  svyglm(walking ~ raceeth_hispanic + edu + bmi + age,
+                   design = subset_female, 
+                   family = quasibinomial())
+## predicted marginals:
+pm_msa  <- svypredmeans(adj_msa, ~msa_nonmetro)
+
+# prevalence ratio:
+rr_msa <- svycontrast(pm_msa, quote(`Metropolitan counties` / `Nonmetropolitan counties`))
+rr_msa
+
+#for the PR Ci you would add this:
+rr    <- as.numeric(coef(rr_msa))
+se    <- as.numeric(SE(rr_msa))
+tcrit <- qt(0.975, degf(subset))
+c(rr    = rr,
+  lower = exp(log(rr) - tcrit * se / rr),
+  upper = exp(log(rr) + tcrit * se / rr))
+
+# BMI
+# predicted marginals:
+adj_bmi <-  svyglm(walking ~ raceeth_hispanic + edu + msa_nonmetro + age,
+                   design = subset_female, 
+                   family = quasibinomial())
+pm_bmi  <- svypredmeans(adj_bmi, ~bmi)
+
+# prevalence ratio:
+rr_bmi <- svycontrast(pm_bmi, quote(`Normal weight` / `Underweight`))
+rr_bmi <- svycontrast(pm_bmi, quote(`Overweight` / `Underweight`))
+rr_bmi <- svycontrast(pm_bmi, quote(`Obesity` / `Underweight`))
+rr_bmi
+
+#for the PR Ci you would add this:
+rr    <- as.numeric(coef(rr_bmi))
+se    <- as.numeric(SE(rr_bmi))
+tcrit <- qt(0.975, degf(subset))
+c(rr    = rr,
+  lower = exp(log(rr) - tcrit * se / rr),
+  upper = exp(log(rr) + tcrit * se / rr)) 
+
+# RACE AND ETHNICITY
+# predicted marginals:
+adj_raceeth <-  svyglm(walking ~ bmi + edu + msa_nonmetro + age,
+                   design = subset_female, 
+                   family = quasibinomial())
+pm_raceeth  <- svypredmeans(adj_raceeth, ~raceeth_hispanic)
+
+# prevalence ratio:
+rr_raceeth <- svycontrast(pm_raceeth, quote(`American Indian or Alaskan Native, non-Hispanic` / `Hispanic`))
+rr_raceeth <- svycontrast(pm_raceeth, quote(`Asian, non-Hispanic` / `Hispanic`))
+rr_raceeth <- svycontrast(pm_raceeth, quote(`White, non-Hispanic` / `Hispanic`))
+rr_raceeth <- svycontrast(pm_raceeth, quote(`Black, non-Hispanic` / `Hispanic`))
+rr_raceeth
+
+#for the PR Ci you would add this:
+rr    <- as.numeric(coef(rr_raceeth))
+se    <- as.numeric(SE(rr_raceeth))
+tcrit <- qt(0.975, degf(subset))
+c(rr    = rr,
+  lower = exp(log(rr) - tcrit * se / rr),
+  upper = exp(log(rr) + tcrit * se / rr)) |> round(2)
+
+
+# EDUCATION
+# predicted marginals:
+adj_edu <-  svyglm(walking ~ bmi + raceeth_hispanic + msa_nonmetro + age,
+                   design = subset_female, 
+                   family = quasibinomial())
+pm_edu  <- svypredmeans(adj_edu, ~edu)
+
+# prevalence ratio:
+rr_edu <- svycontrast(pm_edu, quote(`Attended college or technical school` / `Did not graduate high school`))
+rr_edu
+
+#for the PR Ci you would add this:
+rr    <- as.numeric(coef(rr_edu))
+se    <- as.numeric(SE(rr_edu))
+tcrit <- qt(0.975, degf(subset))
+c(rr    = rr,
+  lower = exp(log(rr) - tcrit * se / rr),
+  upper = exp(log(rr) + tcrit * se / rr)) |> round(2)
+
+
+# BMI
+
+## build model without variable of interest
+adj_bmi <-  svyglm(walking ~ raceeth_hispanic + edu + msa_nonmetro + age,
+                   design = subset_female, 
+                   family = quasibinomial())
+## get predicted marginals
+pm_bmi  <- svypredmeans(adj_bmi, ~bmi)
+
+# levels for BMI
+bmi_levels <- subset_female$variables$bmi |> levels()
+
+# prevalence ratio:
+bind_cols(
+  pm_bmi |> 
+    data.frame(),
+  data.frame(
+    rr = c(
+      svycontrast(pm_bmi, bquote(.(as.name(bmi_levels[1]))/
+                                   .(as.name(bmi_levels[1])))),
+      svycontrast(pm_bmi, bquote(.(as.name(bmi_levels[2]))/
+                                   .(as.name(bmi_levels[1])))),
+      svycontrast(pm_bmi, bquote(.(as.name(bmi_levels[3]))/
+                                   .(as.name(bmi_levels[1])))),
+      svycontrast(pm_bmi, bquote(.(as.name(bmi_levels[4]))/
+                                   .(as.name(bmi_levels[1]))))
+    ),
+    rr_se = c(
+      svycontrast(pm_bmi, bquote(.(as.name(bmi_levels[1]))/
+                                   .(as.name(bmi_levels[1])))) |> SE(),
+      svycontrast(pm_bmi, bquote(.(as.name(bmi_levels[2]))/
+                                   .(as.name(bmi_levels[1])))) |> SE(),
+      svycontrast(pm_bmi, bquote(.(as.name(bmi_levels[3]))/
+                                   .(as.name(bmi_levels[1])))) |> SE(),
+      svycontrast(pm_bmi, bquote(.(as.name(bmi_levels[4]))/
+                                   .(as.name(bmi_levels[1])))) |> SE()
+    )
+)) |> 
+  rename(mean_se = SE) |> 
+  rownames_to_column(var = "characteristic") |> 
+  remove_rownames() |> 
+  mutate(
+    tcrit = qt(0.975, degf(subset_female)),
+    rr_l = exp(log(rr) - tcrit * rr_se / rr),
+    rr_u = exp(log(rr) + tcrit * rr_se / rr),
+    rr_display = paste0(formatC(rr, digits = 2, format = "f"),
+                        " (", 
+                        formatC(rr_l, digits = 2, format = "f"),
+                        "–", 
+                        formatC(rr_u, digits = 2, format = "f"), 
+                        ")")
+    )
 
 ```
 
