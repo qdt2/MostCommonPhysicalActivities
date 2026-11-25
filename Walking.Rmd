@@ -140,7 +140,7 @@ df <- brfss23 %>% mutate(
   bmi = factor(x = `_BMI5CAT`,
                levels = c(1, 2, 3, 4),
                labels = c("Underweight",
-                          "Normal weight",
+                          "Healthy weight",
                           "Overweight",
                           "Obesity"),
                ordered = FALSE),
@@ -823,7 +823,7 @@ comparison_superscript <- function(var, outcome, design, start = 4) {
 # The key assumption is that the PR for each exposure is constant across levels of the other covariates. Each PR is conditional, meaning it is the ratio comparing two people who are identical on all other model variables. A single model gives you PRs for every variable at once. The referent group is whatever the factor’s first level is, and your ref data frame hardcodes it for plotting. The log link can in principle predict probabilities above 1, though this rarely matters for the PR itself.
 
 # to get dataframe for ggplot or column for table with aPR and CIs
-adjustedPR <- function(design) {
+adjustedConditionalPR <- function(design) {
   
   # create logistic regression model
   model <- (svyglm(walking ~ age + raceeth_hispanic + edu + bmi + msa_nonmetro,
@@ -908,7 +908,7 @@ adjustedPR <- function(design) {
 # 
 # This PR is marginal (population-averaged). It does not require the PR to be the same across covariate strata, because the ratio is computed after averaging over the covariate distribution. Using a logistic model avoids the convergence and out-of-range problems that log-binomial models can have. The referent is chosen with the ref argument, and the code relies on the factor level names matching the names in pm.
 
-adjustedPredMargRiskRatio <- function(design, var, ref){
+adjustedMarginalPR <- function(design, var, ref){
   # vector of all exposure variable names
   vars <- c("age", "raceeth", "edu", "msa", "bmi")
   
@@ -1071,7 +1071,7 @@ chisq.test(df3$complete_case, df3$age)
 df3 <- df2 %>% filter(edu %in% c("Did not graduate high school", "Graduated from college or technical school"))
 t.test(data = df3, complete_case ~ edu)
 
-df3 <- df2 %>% filter(bmi %in% c("Normal weight", "Obesity"))
+df3 <- df2 %>% filter(bmi %in% c("Healthy weight", "Obesity"))
 t.test(data = df3, complete_case ~ bmi)
 
 df3 <- df2 %>% filter(msa %in% c("Metropolitan counties", "Nonmetropolitan counties"))
@@ -1418,16 +1418,16 @@ tbl3_female_prev <- bind_rows(
          superscript_female = superscript)
 
 ## adjusted PRs
-# tbl3_female_pr <- adjustedPR(design = subset_female) |> 
+# tbl3_female_pr <- adjustedConditionalPR(design = subset_female) |> 
 #   select(characteristic, display) |> 
 #   rename(pr_female = display)
 
 tbl3_female_pr <- bind_rows(
-  adjustedPredMargRiskRatio(design = subset_female, var = "age", ref = 1),
-  adjustedPredMargRiskRatio(design = subset_female, var = "raceeth", ref = 4),
-  adjustedPredMargRiskRatio(design = subset_female, var = "edu", ref = 1),
-  adjustedPredMargRiskRatio(design = subset_female, var = "msa", ref = 2),
-  adjustedPredMargRiskRatio(design = subset_female, var = "bmi", ref = 1)) |> 
+  adjustedMarginalPR(design = subset_female, var = "age", ref = 1),
+  adjustedMarginalPR(design = subset_female, var = "raceeth", ref = 4),
+  adjustedMarginalPR(design = subset_female, var = "edu", ref = 1),
+  adjustedMarginalPR(design = subset_female, var = "msa", ref = 2),
+  adjustedMarginalPR(design = subset_female, var = "bmi", ref = 2)) |> 
   select(characteristic, rr_display) |> 
   rename(pr_female = rr_display)
   
@@ -1456,15 +1456,15 @@ tbl3_male_prev <- bind_rows(
          superscript_male = superscript)
 
 ## adjusted PRs
-# tbl3_male_pr <- adjustedPR(design = subset_male) |> 
+# tbl3_male_pr <- adjustedConditionalPR(design = subset_male) |> 
 #   select(characteristic, display) |> 
 #   rename(pr_male = display)
 tbl3_male_pr <- bind_rows(
-  adjustedPredMargRiskRatio(design = subset_male, var = "age", ref = 1),
-  adjustedPredMargRiskRatio(design = subset_male, var = "raceeth", ref = 4),
-  adjustedPredMargRiskRatio(design = subset_male, var = "edu", ref = 1),
-  adjustedPredMargRiskRatio(design = subset_male, var = "msa", ref = 2),
-  adjustedPredMargRiskRatio(design = subset_male, var = "bmi", ref = 1)) |> 
+  adjustedMarginalPR(design = subset_male, var = "age", ref = 1),
+  adjustedMarginalPR(design = subset_male, var = "raceeth", ref = 4),
+  adjustedMarginalPR(design = subset_male, var = "edu", ref = 1),
+  adjustedMarginalPR(design = subset_male, var = "msa", ref = 2),
+  adjustedMarginalPR(design = subset_male, var = "bmi", ref = 2)) |> 
   select(characteristic, rr_display) |> 
   rename(pr_male = rr_display)
   
@@ -1483,24 +1483,24 @@ tbl3 <- full_join(tbl3_total,
 # make flextable
 tbl3_ft <- tbl3 %>% 
   flextable() %>%
-  compose(part = "body",
-    i = ~ superscript_total != "",   # only rows needing superscript
-    j = 'prev_total',
-    value = as_paragraph(
-      as_chunk(prev_total),
-      as_sup(superscript_total))) %>% 
-  compose(part = "body",
-    i = ~ superscript_female != "",   # only rows needing superscript
-    j = 'prev_female',
-    value = as_paragraph(
-      as_chunk(prev_female),
-      as_sup(superscript_female))) %>% 
-  compose(part = "body",
-    i = ~ superscript_male != "",   # only rows needing superscript
-    j = 'prev_male',
-    value = as_paragraph(
-      as_chunk(prev_male),
-      as_sup(superscript_male))) %>%
+  # compose(part = "body",
+  #   i = ~ superscript_total != "",   # only rows needing superscript
+  #   j = 'prev_total',
+  #   value = as_paragraph(
+  #     as_chunk(prev_total),
+  #     as_sup(superscript_total))) %>% 
+  # compose(part = "body",
+  #   i = ~ superscript_female != "",   # only rows needing superscript
+  #   j = 'prev_female',
+  #   value = as_paragraph(
+  #     as_chunk(prev_female),
+  #     as_sup(superscript_female))) %>% 
+  # compose(part = "body",
+  #   i = ~ superscript_male != "",   # only rows needing superscript
+  #   j = 'prev_male',
+  #   value = as_paragraph(
+  #     as_chunk(prev_male),
+  #     as_sup(superscript_male))) %>%
   delete_columns(c("superscript_total", "superscript_female", "superscript_male")) %>%
   set_header_labels(
     characteristic = "Characteristic",
@@ -1537,17 +1537,17 @@ tbl3_ft <- tbl3 %>%
   flextable::footnote(i = 4,
                       j = c(2, 3, 5),
                       part = "header",
-                      value = as_paragraph(c("We excluded participants missing data on a characteristic from analysis of unadjusted prevalence for that characteristic")), 
+                      value = as_paragraph(c("We excluded participants missing data on a characteristic from analysis of unadjusted prevalence for that characteristic.")), 
                       ref_symbols = c("b")) %>%
   flextable::footnote(i = 4,
                       j = c(4, 6),
                       part = "header",
-                      value = as_paragraph(c("We created a logistic regression model for each sex and adjusted for age group, race and ethnicity, education level, metropolitan status, and body mass index category. We excluded participants missing data for any of those characteristics, sex, or walking from analysis of adjusted prevalence ratios.")), 
+                      value = as_paragraph(c("We created a logistic regression model for each sex and adjusted for age group, race and ethnicity, education level, metropolitan status, and body mass index category. We excluded participants missing data for any of those characteristics, sex, or walking from analysis of adjusted prevalence ratios. Referent groups for each characteristic were the subgroups with the lowest overall prevalence of reporting walking except \"healthy weight\" for body mass index category.")), 
                       ref_symbols = c("c")) %>%
-    add_footer_lines(
-      value = as_paragraph(
-        as_sup("d-p"),
-        "Within a characteristic for each column, subgroup pairs with the same superscript letters are significantly different (p <0.05, Bonferroni-corrected pairwise t-tests).")) %>% 
+    # add_footer_lines(
+    #   value = as_paragraph(
+    #     as_sup("d-p"),
+    #     "Within a characteristic for each column, subgroup pairs with the same superscript letters are significantly different (p <0.05, Bonferroni-corrected pairwise t-tests).")) %>% 
   autofit(add_w=0) %>%
   flextable::fontsize(size = 10, part="all") %>%
   font(part="all", fontname = "Arial") %>% 
@@ -1561,7 +1561,7 @@ tbl3_ft
 
 ```{r}
 # FEMALES
-pr_female <- adjustedPR(design = subset_female)
+pr_female <- adjustedConditionalPR(design = subset_female)
 
 fig1_female_plot <- ggplot(pr_female, aes(x = RiskRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig.
   geom_vline(aes(xintercept = 1), linewidth = .25, linetype = "dashed") + # line for null
@@ -1583,7 +1583,7 @@ fig1_female_plot <- ggplot(pr_female, aes(x = RiskRatio, y = index, color = stat
   scale_color_manual(values = c("gray65","black")) # color of dots
 
 # MALES
-pr_male <- adjustedPR(design = subset_male)
+pr_male <- adjustedConditionalPR(design = subset_male)
 
 fig1_male_plot <- ggplot(pr_male, aes(x = RiskRatio, y = index, color = statsig, shape = referent)) + # plot OR, different color if stat. sig.
   geom_vline(aes(xintercept = 1), linewidth = .25, linetype = "dashed") + # line for null
@@ -1614,7 +1614,7 @@ fig1_male_plot
 ```{r eval=FALSE, include=FALSE}
 
 # # using function
-# adjustedPR(design = subset_female)
+# adjustedConditionalPR(design = subset_female)
 
 # MSA
 ## build model
@@ -1644,7 +1644,7 @@ adj_bmi <-  svyglm(walking ~ raceeth_hispanic + edu + msa_nonmetro + age,
 pm_bmi  <- svypredmeans(adj_bmi, ~bmi)
 
 # prevalence ratio:
-rr_bmi <- svycontrast(pm_bmi, quote(`Normal weight` / `Underweight`))
+rr_bmi <- svycontrast(pm_bmi, quote(`Healthy weight` / `Underweight`))
 rr_bmi <- svycontrast(pm_bmi, quote(`Overweight` / `Underweight`))
 rr_bmi <- svycontrast(pm_bmi, quote(`Obesity` / `Underweight`))
 rr_bmi
